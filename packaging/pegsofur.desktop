@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pegs of Ur
+GenericName=Dice and Pegboard Strategy Game
+Comment=Ancient city-states dice and wooden pegboard strategy game for 1-4 players
+Exec=pegsofur
+Icon=pegsofur
+Terminal=false
+Categories=Game;BoardGame;StrategyGame;
+Keywords=dice;boardgame;pegboard;strategy;godot;

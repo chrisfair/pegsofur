@@ -1,0 +1,4 @@
+import gdext
+import classes/pegs_of_ur_controller
+
+GDExtensionEntryPoint

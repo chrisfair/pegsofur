@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3a2616"/>
+      <stop offset="100%" stop-color="#1e130b"/>
+    </linearGradient>
+    <linearGradient id="bronze" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e3b363"/>
+      <stop offset="100%" stop-color="#9e6827"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="22" fill="url(#bg)" stroke="url(#bronze)" stroke-width="5"/>
+  <!-- Step Pyramid -->
+  <polygon points="22,98 106,98 100,84 28,84" fill="url(#bronze)"/>
+  <polygon points="32,82 96,82 90,68 38,68" fill="url(#bronze)"/>
+  <polygon points="42,66 86,66 80,52 48,52" fill="url(#bronze)"/>
+  <polygon points="52,50 76,50 72,38 56,38" fill="#f3d28f"/>
+  <!-- Die pips accent -->
+  <circle cx="30" cy="30" r="6" fill="#5aa9e6"/>
+  <circle cx="98" cy="30" r="6" fill="#d9534f"/>
+</svg>

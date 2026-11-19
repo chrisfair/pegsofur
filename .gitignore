@@ -1,0 +1,10 @@
+.godot/
+.nimble/
+build/
+nim/lib/
+nim/.nimcache/
+*.import
+*.o
+*.gcno
+*.gcda
+*.gcov
