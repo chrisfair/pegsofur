@@ -1,6 +1,6 @@
 # Maintainer: Christopher Patrick Fair <christopherpatrickfair@gmail.com>
 pkgname=pegsofur
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 _gdext_ver=0.17.1
 pkgdesc="Ancient city-states dice and wooden pegboard strategy game for 1-4 Human/AI players"
@@ -14,6 +14,7 @@ depends=(
 )
 makedepends=(
   'nim>=2.2.0'
+  'git'
 )
 provides=('pegsofur')
 conflicts=('pegsofur')
@@ -22,7 +23,7 @@ source=(
   "gdext-nim-${_gdext_ver}.tar.gz::https://github.com/godot-nim/gdext-nim/archive/refs/tags/v${_gdext_ver}.tar.gz"
 )
 sha256sums=(
-  '0921b0911392839a542a3dbcc6ec4aea3b3422c1d9f018df781560946c7055a8'
+  '0000000000000000000000000000000000000000000000000000000000000000'
   'e446f3d682e49c609552bee599d21de01ebc86b47889559ab267655b3e887f2d'
 )
 
@@ -31,6 +32,11 @@ prepare() {
   export HOME="${srcdir}/home"
   mkdir -p "${HOME}"
   cd "${srcdir}/gdext-nim-${_gdext_ver}"
+  if [ ! -d .git ]; then
+    git init -q
+    git -c user.name="makepkg" -c user.email="makepkg@localhost" add -A
+    git -c user.name="makepkg" -c user.email="makepkg@localhost" commit -q -m "source"
+  fi
   nimble install -y
 }
 
