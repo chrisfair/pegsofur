@@ -1,6 +1,6 @@
 ## Godot 4 GDExtension wooden tabletop renderer & audio controller for Pegs of Ur.
 
-import std/[math, random, strformat]
+import std/[math, os, random, strformat]
 import gdext
 import gdext/classes/[
   gdengine,
@@ -61,7 +61,7 @@ type PegsOfUrController* {.gdsync.} = ptr object of Node2D
   dice3dNodes: array[MaxSettlements, Node3D]
   diceEnv: gdref Environment
   diceWoodMat: gdref StandardMaterial3D
-  diceBoxMeshes: array[4, gdref BoxMesh]
+  diceCoreBox: gdref BoxMesh
   diceFaceQuad: gdref QuadMesh
   diceFaceMats: array[DieFace, gdref StandardMaterial3D]
   diceVpW: int32
@@ -228,22 +228,15 @@ proc init3dDiceRig(self: PegsOfUrController) =
   svp.addChild(fillLight)
 
   self.diceWoodMat = instantiate(StandardMaterial3D)
-  self.diceWoodMat[].setAlbedo(color(0.40, 0.23, 0.11, 1.0))
-  self.diceWoodMat[].setRoughness(0.56)
-  self.diceWoodMat[].setMetallic(0.04)
+  self.diceWoodMat[].setAlbedo(color(0.36, 0.21, 0.10, 1.0))
+  self.diceWoodMat[].setRoughness(0.58)
+  self.diceWoodMat[].setMetallic(0.03)
 
-  let boxSizes = [
-    vector3(1.0, 1.0, 1.0),
-    vector3(1.04, 0.88, 0.88),
-    vector3(0.88, 1.04, 0.88),
-    vector3(0.88, 0.88, 1.04),
-  ]
-  for bi in 0 ..< 4:
-    self.diceBoxMeshes[bi] = instantiate(BoxMesh)
-    self.diceBoxMeshes[bi][].setSize(boxSizes[bi])
+  self.diceCoreBox = instantiate(BoxMesh)
+  self.diceCoreBox[].setSize(vector3(1.0, 1.0, 1.0))
 
   self.diceFaceQuad = instantiate(QuadMesh)
-  self.diceFaceQuad[].setSize(vector2(0.88, 0.88))
+  self.diceFaceQuad[].setSize(vector2(0.93, 0.93))
 
   for df in DieFace:
     let fm = instantiate(StandardMaterial3D)
@@ -254,19 +247,17 @@ proc init3dDiceRig(self: PegsOfUrController) =
       fm[].setTexture(textureAlbedo, self.dieFaceTex[df])
     self.diceFaceMats[df] = fm
 
-  let faceOffset = 0.522
+  let faceOffset = 0.502
   for i in 0 ..< MaxSettlements:
     let root = instantiate(Node3D)
     root.setVisible(false)
 
-    # Chamfered hardwood core built from 4 overlapping boxes so edges catch 3D highlights.
-    for bi in 0 ..< 4:
-      let bodyMesh = instantiate(MeshInstance3D)
-      bodyMesh.setMesh(self.diceBoxMeshes[bi] as gdref Mesh)
-      bodyMesh.setMaterialOverride(self.diceWoodMat as gdref Material)
-      root.addChild(bodyMesh)
+    let bodyMesh = instantiate(MeshInstance3D)
+    bodyMesh.setMesh(self.diceCoreBox as gdref Mesh)
+    bodyMesh.setMaterialOverride(self.diceWoodMat as gdref Material)
+    root.addChild(bodyMesh)
 
-    # 6 carved face plates aligned so each faceTargetEuler(df) brings df upright to +Y.
+    # 6 carved face plates flush against the cube, aligned so faceTargetEuler(df) brings df upright to +Y.
     for df in DieFace:
       let plate = instantiate(MeshInstance3D)
       plate.setMesh(self.diceFaceQuad as gdref Mesh)
@@ -285,11 +276,11 @@ proc init3dDiceRig(self: PegsOfUrController) =
         plate.setPosition(vector3(0.0, 0.0, -faceOffset))
         plate.setRotation(vector3(PI, 0.0, 0.0))
       of dfOmenWares2:
-        let b = basis(vector3(0.0, -1.0, 0.0), vector3(0.0, 0.0, -1.0), vector3(1.0, 0.0, 0.0))
-        plate.setTransform(transform3D(b, vector3(faceOffset, 0.0, 0.0)))
+        plate.setPosition(vector3(faceOffset, 0.0, 0.0))
+        plate.setRotation(vector3(0.0, PI * 0.5, -PI * 0.5))
       of dfGrainOrBuilders2:
-        let b = basis(vector3(0.0, 1.0, 0.0), vector3(0.0, 0.0, -1.0), vector3(-1.0, 0.0, 0.0))
-        plate.setTransform(transform3D(b, vector3(-faceOffset, 0.0, 0.0)))
+        plate.setPosition(vector3(-faceOffset, 0.0, 0.0))
+        plate.setRotation(vector3(0.0, -PI * 0.5, PI * 0.5))
       root.addChild(plate)
 
     svp.addChild(root)
@@ -374,7 +365,8 @@ method ready*(self: PegsOfUrController) {.gdsync.} =
   let vp = self.getViewportRect()
   let w = if vp.size.x > 200.0: float(vp.size.x) else: 1680.0
   let h = if vp.size.y > 200.0: float(vp.size.y) else: 960.0
-  self.presenter = newPegsOfUrPresenter(w, h, showSetupModal = not self.headless)
+  let skipSetup = self.headless or getEnv("PEGS_SKIP_SETUP") == "1"
+  self.presenter = newPegsOfUrPresenter(w, h, showSetupModal = not skipSetup)
   self.init3dDiceRig()
   self.sync3dDice()
   for ev in self.presenter.popAudioEvents():
@@ -617,7 +609,7 @@ proc drawDiceTray(self: PegsOfUrController; font: gdref Font) =
         let isB = (i < p.game.choiceIsBuilders.len and p.game.choiceIsBuilders[i])
         badge = if isB: "2 Builders" else: "2 Grain"
         bCol = if isB: color(0.58, 0.84, 1.0, 1.0) else: color(0.64, 0.96, 0.54, 1.0)
-      self.drawText(font, cx - 56.0, cy + dw * 0.5 + 15.0, badge, 11, bCol, 112.0, horizontalAlignmentCenter, shadow = true)
+      self.drawText(font, cx - 56.0, cy + dw * 0.5 + 26.0, badge, 11, bCol, 112.0, horizontalAlignmentCenter, shadow = true)
 
 proc drawButtons(self: PegsOfUrController; font: gdref Font) =
   let p = self.presenter
