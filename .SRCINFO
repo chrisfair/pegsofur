@@ -16,7 +16,7 @@ pkgbase = pegsofur
 	conflicts = pegsofur
 	source = pegsofur-0.1.1.tar.gz::https://github.com/chrisfair/pegsofur/archive/refs/tags/v0.1.1.tar.gz
 	source = gdext-nim-0.17.1.tar.gz::https://github.com/godot-nim/gdext-nim/archive/refs/tags/v0.17.1.tar.gz
-	sha256sums = 0000000000000000000000000000000000000000000000000000000000000000
+	sha256sums = 253f05366be57d7d4200c34452441f5b7c45fda65ac85b2e8fce8454e09b46a4
 	sha256sums = e446f3d682e49c609552bee599d21de01ebc86b47889559ab267655b3e887f2d
 
 pkgname = pegsofur

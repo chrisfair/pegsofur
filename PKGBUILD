@@ -23,7 +23,7 @@ source=(
   "gdext-nim-${_gdext_ver}.tar.gz::https://github.com/godot-nim/gdext-nim/archive/refs/tags/v${_gdext_ver}.tar.gz"
 )
 sha256sums=(
-  '0000000000000000000000000000000000000000000000000000000000000000'
+  '253f05366be57d7d4200c34452441f5b7c45fda65ac85b2e8fce8454e09b46a4'
   'e446f3d682e49c609552bee599d21de01ebc86b47889559ab267655b3e887f2d'
 )
 
