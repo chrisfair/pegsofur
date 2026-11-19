@@ -59,9 +59,14 @@ type PegsOfUrController* {.gdsync.} = ptr object of Node2D
   diceVpTex: gdref Texture2D
   diceCamera: Camera3D
   dice3dNodes: array[MaxSettlements, Node3D]
+  dice3dOutlines: array[MaxSettlements, MeshInstance3D]
   diceEnv: gdref Environment
   diceWoodMat: gdref StandardMaterial3D
   diceCoreBox: gdref BoxMesh
+  diceOutlineBox: gdref BoxMesh
+  diceGlowBlueMat: gdref StandardMaterial3D
+  diceGlowRedMat: gdref StandardMaterial3D
+  diceGlowHoverMat: gdref StandardMaterial3D
   diceFaceQuad: gdref QuadMesh
   diceFaceMats: array[DieFace, gdref StandardMaterial3D]
   diceVpW: int32
@@ -235,6 +240,19 @@ proc init3dDiceRig(self: PegsOfUrController) =
   self.diceCoreBox = instantiate(BoxMesh)
   self.diceCoreBox[].setSize(vector3(1.0, 1.0, 1.0))
 
+  self.diceOutlineBox = instantiate(BoxMesh)
+  self.diceOutlineBox[].setSize(vector3(1.11, 1.11, 1.11))
+
+  proc makeGlowMat(col: Color): gdref StandardMaterial3D =
+    result = instantiate(StandardMaterial3D)
+    result[].setAlbedo(col)
+    result[].setShadingMode(shadingModeUnshaded)
+    result[].setCullMode(cullFront)
+
+  self.diceGlowBlueMat = makeGlowMat(color(0.16, 0.78, 1.0, 1.0))
+  self.diceGlowRedMat = makeGlowMat(color(1.0, 0.16, 0.14, 1.0))
+  self.diceGlowHoverMat = makeGlowMat(color(1.0, 0.90, 0.48, 1.0))
+
   self.diceFaceQuad = instantiate(QuadMesh)
   self.diceFaceQuad[].setSize(vector2(0.93, 0.93))
 
@@ -256,6 +274,13 @@ proc init3dDiceRig(self: PegsOfUrController) =
     bodyMesh.setMesh(self.diceCoreBox as gdref Mesh)
     bodyMesh.setMaterialOverride(self.diceWoodMat as gdref Material)
     root.addChild(bodyMesh)
+
+    let outlineMesh = instantiate(MeshInstance3D)
+    outlineMesh.setMesh(self.diceOutlineBox as gdref Mesh)
+    outlineMesh.setMaterialOverride(self.diceGlowBlueMat as gdref Material)
+    outlineMesh.setVisible(false)
+    root.addChild(outlineMesh)
+    self.dice3dOutlines[i] = outlineMesh
 
     # 6 carved face plates flush against the cube, aligned so faceTargetEuler(df) brings df upright to +Y.
     for df in DieFace:
@@ -324,6 +349,26 @@ proc sync3dDice(self: PegsOfUrController) =
     node.setPosition(vector3(wx, wy, wz))
     node.setScale(vector3(cubeScale, cubeScale, cubeScale))
     node.setRotation(vector3(d.rotX, d.rotY, d.rotZ))
+
+    let outline = self.dice3dOutlines[i]
+    if not outline.isNil:
+      let p = self.presenter
+      if d.settled:
+        let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
+        let lockedOmen = (d.displayFace == dfOmenWares2 and not p.game.isSolo() and p.game.phase == phRoll)
+        if (p.divinationArmed and tray.hoveredDie == i) or selReroll:
+          outline.setMaterialOverride(self.diceGlowBlueMat as gdref Material)
+          outline.setVisible(true)
+        elif lockedOmen:
+          outline.setMaterialOverride(self.diceGlowRedMat as gdref Material)
+          outline.setVisible(true)
+        elif tray.hoveredDie == i and p.isDieClickable(i):
+          outline.setMaterialOverride(self.diceGlowHoverMat as gdref Material)
+          outline.setVisible(true)
+        else:
+          outline.setVisible(false)
+      else:
+        outline.setVisible(false)
 
 method ready*(self: PegsOfUrController) {.gdsync.} =
   self.rng = initRand(hardwareOrTimerSeed64())
@@ -580,18 +625,18 @@ proc drawDiceTray(self: PegsOfUrController; font: gdref Font) =
       if not tex[].isNil:
         self.drawTextureRect(tex, dRect, tile = false)
 
-    if d.settled:
-      let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
-      let lockedOmen = (d.displayFace == dfOmenWares2 and not p.game.isSolo() and p.game.phase == phRoll)
-      let ringRect = rect2(-dw * 0.5 - 3.0, -dw * 0.5 - 3.0, dw + 6.0, dw + 6.0)
-      if p.divinationArmed and tray.hoveredDie == i:
-        self.drawRect(ringRect, color(0.98, 0.78, 0.22, 0.95), filled = false, width = 3.0)
-      elif selReroll:
-        self.drawRect(ringRect, color(0.98, 0.76, 0.18, 0.95), filled = false, width = 3.2)
-      elif lockedOmen:
-        self.drawRect(ringRect, color(0.78, 0.18, 0.15, 0.90), filled = false, width = 2.4)
-      elif tray.hoveredDie == i and p.isDieClickable(i):
-        self.drawRect(ringRect, color(1.0, 0.94, 0.75, 0.78), filled = false, width = 2.2)
+      if d.settled:
+        let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
+        let lockedOmen = (d.displayFace == dfOmenWares2 and not p.game.isSolo() and p.game.phase == phRoll)
+        let ringRect = rect2(-dw * 0.5 - 3.0, -dw * 0.5 - 3.0, dw + 6.0, dw + 6.0)
+        if p.divinationArmed and tray.hoveredDie == i:
+          self.drawRect(ringRect, color(0.16, 0.78, 1.0, 0.95), filled = false, width = 3.0)
+        elif selReroll:
+          self.drawRect(ringRect, color(0.16, 0.78, 1.0, 0.95), filled = false, width = 3.2)
+        elif lockedOmen:
+          self.drawRect(ringRect, color(1.0, 0.16, 0.14, 0.90), filled = false, width = 2.4)
+        elif tray.hoveredDie == i and p.isDieClickable(i):
+          self.drawRect(ringRect, color(1.0, 0.94, 0.75, 0.78), filled = false, width = 2.2)
 
     self.drawSetTransform(vector2(0.0, 0.0), 0.0, vector2(1.0, 1.0))
 
@@ -601,10 +646,10 @@ proc drawDiceTray(self: PegsOfUrController; font: gdref Font) =
       if p.game.phase == phRoll:
         if i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i]:
           badge = "REROLL"
-          bCol = color(1.0, 0.84, 0.28, 1.0)
+          bCol = color(0.36, 0.86, 1.0, 1.0)
         elif d.displayFace == dfOmenWares2 and not p.game.isSolo():
           badge = "OMEN LOCKED"
-          bCol = color(1.0, 0.46, 0.38, 1.0)
+          bCol = color(1.0, 0.34, 0.30, 1.0)
       elif d.displayFace == dfGrainOrBuilders2 and p.game.phase in {phAssignChoices, phBuild, phBuy}:
         let isB = (i < p.game.choiceIsBuilders.len and p.game.choiceIsBuilders[i])
         badge = if isB: "2 Builders" else: "2 Grain"

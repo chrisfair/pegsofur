@@ -16,6 +16,8 @@ type
     angle*, angVel*: float
     rotX*, rotY*, rotZ*: float
     velRotX*, velRotY*, velRotZ*: float
+    bounces*: int
+    restDelay*: float
     displayFace*: DieFace
     targetFace*: DieFace
     delay*: float
@@ -162,6 +164,8 @@ proc triggerRoll*(tray: DiceTraySim; rolledIndices: openArray[int]; faces: openA
     d.velRotX = tray.rng.rand(-14.0 .. 14.0)
     d.velRotY = tray.rng.rand(-10.0 .. 10.0)
     d.velRotZ = tray.rng.rand(-14.0 .. 14.0)
+    d.bounces = 0
+    d.restDelay = 0.0
     d.flipTimer = 0.0
     tray.dice[idx] = d
 
@@ -196,10 +200,11 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
         tray.dice[i] = d
         continue
 
-      d.vz -= TrayGravity * dt
+      if d.z > 0.0 or d.vz > 0.0:
+        d.vz -= TrayGravity * dt
+        d.z += d.vz * dt
       d.posX += d.velX * dt
       d.posY += d.velY * dt
-      d.z += d.vz * dt
       d.angle += d.angVel * dt
       d.rotX += d.velRotX * dt
       d.rotY += d.velRotY * dt
@@ -213,25 +218,42 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
 
       if d.posX < minX:
         d.posX = minX
-        d.velX = abs(d.velX) * 0.58
+        d.velX = abs(d.velX) * 0.56
         hitWall = true
       elif d.posX > maxX:
         d.posX = maxX
-        d.velX = -abs(d.velX) * 0.58
+        d.velX = -abs(d.velX) * 0.56
         hitWall = true
 
       if d.posY < minY:
         d.posY = minY
-        d.velY = abs(d.velY) * 0.58
+        d.velY = abs(d.velY) * 0.56
         hitWall = true
       elif d.posY > maxY:
         d.posY = maxY
-        d.velY = -abs(d.velY) * 0.58
+        d.velY = -abs(d.velY) * 0.56
         hitWall = true
 
       let speed2D = hypot(d.velX, d.velY)
       if hitWall and speed2D > 55.0:
         audioOut.add(AudioEvent(kind: akWoodBounce, energy: clamp(speed2D / 560.0, 0.14, 0.82), pitch: 1.0))
+
+      let (tx, tz) = faceTargetEuler(d.targetFace)
+      let errX = wrapAngleDelta(tx, d.rotX)
+      let errZ = wrapAngleDelta(tz, d.rotZ)
+
+      # After the first floor bounce, apply organic gravity-rocking torque toward the rolled face
+      # so the die settles naturally onto its face instead of snapping at the end.
+      if d.bounces >= 1:
+        let kSpring = if d.bounces == 1: 18.0 else: 46.0
+        let kDamp = if d.bounces == 1: 3.2 else: 7.2
+        d.velRotX += errX * kSpring * dt
+        d.velRotZ += errZ * kSpring * dt
+        let rotDecay = exp(-kDamp * dt)
+        d.velRotX *= rotDecay
+        d.velRotZ *= rotDecay
+        d.velRotY *= exp(-4.8 * dt)
+        d.angVel *= exp(-5.0 * dt)
 
       if d.z > 10.0 or speed2D > 130.0:
         d.flipTimer += dt
@@ -244,39 +266,66 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
       if d.z <= 0.0:
         d.z = 0.0
         let impactSpeed = abs(d.vz)
-        if impactSpeed > 58.0:
+        if impactSpeed > 52.0:
+          inc d.bounces
           audioOut.add(AudioEvent(kind: akWoodBounce, energy: clamp(impactSpeed / 500.0, 0.10, 1.0), pitch: 1.0))
-          d.vz = impactSpeed * tray.rng.rand(0.41 .. 0.51)
-          d.velX *= 0.68
-          d.velY *= 0.68
-          d.angVel = d.angVel * 0.64 + tray.rng.rand(-2.2 .. 2.2)
-          d.velRotX = d.velRotX * 0.58 + tray.rng.rand(-3.5 .. 3.5)
-          d.velRotY = d.velRotY * 0.58 + tray.rng.rand(-2.5 .. 2.5)
-          d.velRotZ = d.velRotZ * 0.58 + tray.rng.rand(-3.5 .. 3.5)
+          d.vz = impactSpeed * tray.rng.rand(0.40 .. 0.49)
+          d.velX *= 0.70
+          d.velY *= 0.70
+          d.angVel = d.angVel * 0.62 + tray.rng.rand(-1.8 .. 1.8)
+          if d.bounces == 1:
+            d.velRotX = d.velRotX * 0.55 + errX * 2.2 + tray.rng.rand(-1.6 .. 1.6)
+            d.velRotY = d.velRotY * 0.55 + tray.rng.rand(-1.8 .. 1.8)
+            d.velRotZ = d.velRotZ * 0.55 + errZ * 2.2 + tray.rng.rand(-1.6 .. 1.6)
+          else:
+            d.velRotX = d.velRotX * 0.52 + errX * 3.0
+            d.velRotY *= 0.50
+            d.velRotZ = d.velRotZ * 0.52 + errZ * 3.0
         else:
           d.vz = 0.0
-          d.velX = 0.0
-          d.velY = 0.0
-          d.angVel = 0.0
-          d.velRotX = 0.0
-          d.velRotY = 0.0
-          d.velRotZ = 0.0
+          if d.bounces == 0:
+            d.bounces = 2
+          # Natural wood-tray sliding friction and gentle rocking settle on the floor
+          let linDecay = exp(-8.5 * dt)
+          d.velX *= linDecay
+          d.velY *= linDecay
+          d.velRotY *= exp(-7.5 * dt)
+          d.angVel *= exp(-8.0 * dt)
           d.displayFace = d.targetFace
-          d.settled = true
-          if d.targetFace == dfOmenWares2 and d.wasRolled:
-            audioOut.add(AudioEvent(kind: akOmenThud, energy: 0.9, pitch: 1.0))
-          else:
-            audioOut.add(AudioEvent(kind: akWoodBounce, energy: 0.16, pitch: 1.06))
-          d.wasRolled = false
+
+          let stillMoving =
+            hypot(d.velX, d.velY) > 10.0 or
+            abs(errX) > 0.055 or abs(errZ) > 0.055 or
+            abs(d.velRotX) > 0.32 or abs(d.velRotZ) > 0.32
+          if not stillMoving:
+            d.velX = 0.0
+            d.velY = 0.0
+            d.angVel = 0.0
+            d.velRotX = 0.0
+            d.velRotY = 0.0
+            d.velRotZ = 0.0
+            d.rotX = tx
+            d.rotZ = tz
+            d.displayFace = d.targetFace
+            d.settled = true
+            d.restDelay = 0.16
+            if d.targetFace == dfOmenWares2 and d.wasRolled:
+              audioOut.add(AudioEvent(kind: akOmenThud, energy: 0.9, pitch: 1.0))
+            else:
+              audioOut.add(AudioEvent(kind: akWoodBounce, energy: 0.16, pitch: 1.06))
+            d.wasRolled = false
     else:
-      let s = clamp(dt * 12.5, 0.0, 1.0)
-      d.posX += (d.homeX - d.posX) * s
-      d.posY += (d.homeY - d.posY) * s
-      d.angle += (0.0 - d.angle) * s
-      let (tx, tz) = faceTargetEuler(d.targetFace)
-      d.rotX += wrapAngleDelta(tx, d.rotX) * s
-      d.rotY += wrapAngleDelta(0.0, d.rotY) * s
-      d.rotZ += wrapAngleDelta(tz, d.rotZ) * s
+      if d.restDelay > 0.0:
+        d.restDelay = max(0.0, d.restDelay - dt)
+      else:
+        let s = clamp(dt * 7.0, 0.0, 1.0)
+        d.posX += (d.homeX - d.posX) * s
+        d.posY += (d.homeY - d.posY) * s
+        d.angle += (0.0 - d.angle) * s
+        let (tx, tz) = faceTargetEuler(d.targetFace)
+        d.rotX += wrapAngleDelta(tx, d.rotX) * s
+        d.rotY += wrapAngleDelta(0.0, d.rotY) * s
+        d.rotZ += wrapAngleDelta(tz, d.rotZ) * s
 
     tray.dice[i] = d
 
