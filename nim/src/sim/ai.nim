@@ -113,11 +113,12 @@ proc stepBuild(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
   while g.turnBuilders > 0:
     let sets = g.players[pIdx].settlements
     var targetSets = if diff == stAiEasy: 5 else: 6
-    if g.playerHasAdv(pIdx, "plowshares") and diff == stAiHard:
-      targetSets = 7
+    if diff == stAiHard or g.playerHasAdv(pIdx, "plowshares"):
+      targetSets = MaxSettlements
 
     var bestSnatch = -1
     var bestSnatchRatio = -1.0
+    let doneWorks = g.playerCompletedWorkCount(pIdx)
     for gwIdx in 0 ..< GreatWorks.len:
       if not g.canBuildWorkBuilder(gwIdx):
         continue
@@ -126,6 +127,8 @@ proc stepBuild(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
         var vp = if g.workFirstOwner[gwIdx] == -1: GreatWorks[gwIdx].vpFirst else: GreatWorks[gwIdx].vpLater
         if g.playerHasAdv(pIdx, "urban_planning"):
           vp += 2
+        if doneWorks == MasterBuilderWorkCount - 1:
+          vp += MasterBuilderVp
         let ratio = float(vp) / float(max(1, rem))
         if vp > 0 and ratio > bestSnatchRatio:
           bestSnatchRatio = ratio
@@ -136,7 +139,7 @@ proc stepBuild(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
       discard g.addBuilderToGreatWork(bestSnatch, rem)
       continue
 
-    if sets < targetSets and g.canBuildSettlementBuilder() and (not g.finalRoundTriggered or g.playerHasAdv(pIdx, "hegemony")):
+    if sets < targetSets and g.canBuildSettlementBuilder() and (not g.finalRoundTriggered or sets == MaxSettlements - 1 or g.playerHasAdv(pIdx, "hegemony")):
       discard g.addBuilderToSettlement(1)
       continue
 
@@ -186,6 +189,11 @@ proc stepBuy(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
     let aDef = Advancements[aIdx]
     let overpay = float(plan.totalPaid - plan.cost)
     var utility = float(aDef.vp) * 2.2 - overpay * 0.22
+    let nextAdvCnt = g.playerAdvCount(pIdx) + 1
+    if g.firstTo4AdvOwner == -1 and nextAdvCnt == FirstTo4AdvCount:
+      utility += float(FirstTo4AdvVp) * 2.2
+    if g.firstTo8AdvOwner == -1 and nextAdvCnt == FirstTo8AdvCount:
+      utility += float(FirstTo8AdvVp) * 2.2
 
     case aDef.id
     of "divination", "minting": utility += 5.5 * earlyFactor

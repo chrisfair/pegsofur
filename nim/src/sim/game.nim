@@ -24,6 +24,7 @@ type
     color*: Rgba
     worksVp*: int
     advancementsVp*: int
+    milestonesVp*: int
     bonusVp*: int
     calamities*: int
     totalVp*: int
@@ -62,6 +63,8 @@ type
     finalRoundTriggered*: bool
     finalTriggerReason*: string
     workFirstOwner*: array[7, int]
+    firstTo4AdvOwner*: int
+    firstTo8AdvOwner*: int
 
     diceFaces*: seq[DieFace]
     diceSelectedForReroll*: seq[bool]
@@ -92,6 +95,8 @@ proc newPegsOfUrGame*(seed: int64 = -1; tpmPath: string = DefaultTpmDevice): Peg
     phase: phSetup,
     roundNumber: 1,
     maxRolls: 3,
+    firstTo4AdvOwner: -1,
+    firstTo8AdvOwner: -1,
   )
   for i in 0 ..< GreatWorks.len:
     result.workFirstOwner[i] = -1
@@ -129,6 +134,11 @@ proc playerCompletedWorkCount*(g: PegsOfUrGame; pIdx: int): int =
     if g.playerCompletedWork(pIdx, gwIdx):
       inc result
 
+proc playerMaxedWareTrackCount*(g: PegsOfUrGame; pIdx: int): int =
+  for wt in WareType:
+    if g.players[pIdx].wares[wt] >= wareMaxQty(wt):
+      inc result
+
 proc computeScoreBreakdown*(g: PegsOfUrGame; pIdx: int): ScoreBreakdown =
   let p = g.players[pIdx]
   var wVp = 0
@@ -141,7 +151,20 @@ proc computeScoreBreakdown*(g: PegsOfUrGame; pIdx: int): ScoreBreakdown =
     if p.advancements[aIdx]:
       aVp += Advancements[aIdx].vp
 
-  var bonusVp = 0
+  var mVp = 0
+  if p.settlements >= MaxSettlements:
+    mVp += SevenCitiesVp
+  if p.calamities == 0:
+    mVp += UnscathedRealmVp
+  mVp += g.playerMaxedWareTrackCount(pIdx) * MasterTraderPerTrackVp
+  if g.playerCompletedWorkCount(pIdx) >= MasterBuilderWorkCount:
+    mVp += MasterBuilderVp
+  if g.firstTo4AdvOwner == pIdx:
+    mVp += FirstTo4AdvVp
+  if g.firstTo8AdvOwner == pIdx:
+    mVp += FirstTo8AdvVp
+
+  var bonusVp = mVp
   if g.playerHasAdv(pIdx, "urban_planning"):
     bonusVp += 2 * g.playerCompletedWorkCount(pIdx)
   if g.playerHasAdv(pIdx, "hegemony"):
@@ -154,6 +177,7 @@ proc computeScoreBreakdown*(g: PegsOfUrGame; pIdx: int): ScoreBreakdown =
     color: p.color,
     worksVp: wVp,
     advancementsVp: aVp,
+    milestonesVp: mVp,
     bonusVp: bonusVp,
     calamities: p.calamities,
     totalVp: total,
@@ -198,6 +222,8 @@ proc startGame*(g: PegsOfUrGame; configs: openArray[SeatConfig]) =
   g.gameFinishedTriggered = false
   for i in 0 ..< GreatWorks.len:
     g.workFirstOwner[i] = -1
+  g.firstTo4AdvOwner = -1
+  g.firstTo8AdvOwner = -1
 
   for cfg in configs:
     if cfg.seatType == stClosed:
@@ -224,7 +250,7 @@ proc startGame*(g: PegsOfUrGame; configs: openArray[SeatConfig]) =
   g.finalTriggerReason = ""
   let rngTag = entropySourceLabel(g.entropy)
   if g.isSolo():
-    g.addLog(fmt"Started 1-Player Solo Pegs of Ur (10 Rounds) [RNG: {rngTag}].")
+    g.addLog(fmt"Started 1-Player Solo Pegs of Ur ({SoloMaxRounds} Rounds) [RNG: {rngTag}].")
   else:
     g.addLog(fmt"Started {g.players.len}-Realm Pegs of Ur match [RNG: {rngTag}].")
   g.beginTurn()
@@ -611,7 +637,10 @@ proc addBuilderToSettlement*(g: PegsOfUrGame; count: int = 1): int =
     inc result
     if g.players[pIdx].settlementProgress[slot] >= req:
       inc g.players[pIdx].settlements
-      g.addLog(fmt"{g.players[pIdx].name} founded Settlement #{g.players[pIdx].settlements}!")
+      if g.players[pIdx].settlements >= MaxSettlements:
+        g.addLog(fmt"{g.players[pIdx].name} founded Settlement #{g.players[pIdx].settlements} — Seven Cities milestone (+{SevenCitiesVp} Renown)!")
+      else:
+        g.addLog(fmt"{g.players[pIdx].name} founded Settlement #{g.players[pIdx].settlements}!")
 
 proc canBuildWorkBuilder*(g: PegsOfUrGame; gwIdx: int): bool =
   if g.phase != phBuild or g.turnBuilders <= 0 or gwIdx < 0 or gwIdx >= GreatWorks.len:
@@ -768,6 +797,13 @@ proc buyAdvancement*(g: PegsOfUrGame; advIdx: int; customMask: openArray[bool] =
 
   let summary = if spentParts.len > 0: spentParts.join(", ") else: "0s"
   g.addLog(fmt"{g.players[pIdx].name} unlocked {advDef.name} ({advDef.cost}s, +{advDef.vp} Renown) using {summary}.")
+  let advCnt = g.playerAdvCount(pIdx)
+  if g.firstTo4AdvOwner == -1 and advCnt >= FirstTo4AdvCount:
+    g.firstTo4AdvOwner = pIdx
+    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo4AdvCount} Advancements (+{FirstTo4AdvVp} Renown)!")
+  if g.firstTo8AdvOwner == -1 and advCnt >= FirstTo8AdvCount:
+    g.firstTo8AdvOwner = pIdx
+    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo8AdvCount} Advancements (+{FirstTo8AdvVp} Renown)!")
   g.checkEndTriggers()
   g.enterDiscardOrEndTurn()
   true

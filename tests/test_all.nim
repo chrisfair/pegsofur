@@ -1,6 +1,6 @@
 ## Comprehensive unit, TPM/Timer entropy, rules, AI, physics, and UI presenter test suite.
 
-import std/[strutils, unittest]
+import std/[math, strutils, unittest]
 import sim/[data, entropy, game, ai, physics, presenter]
 
 proc make4pGame(seed: int64 = 42): PegsOfUrGame =
@@ -329,7 +329,7 @@ suite "Core Pegs of Ur Rules Engine":
     g.players[2].wares = [4, 4, 0, 0, 0]
     check g.excessWaresToDiscard(2) == 0
 
-  test "Scoring Bonuses (Urban Planning & Hegemony) and Tiebreaker Sorting":
+  test "Scoring Bonuses (Urban Planning, Hegemony, All 6 Milestones) and Tiebreaker Sorting":
     let g = make4pGame()
     g.players[0].settlements = 5
     g.players[0].workProgress[0] = 3
@@ -341,8 +341,43 @@ suite "Core Pegs of Ur Rules Engine":
     let sb = g.computeScoreBreakdown(0)
     check sb.worksVp == 2
     check sb.advancementsVp == 25
-    check sb.bonusVp == 9
-    check sb.totalVp == 36
+    # Urban Planning (2*2=4) + Hegemony (5) + Unscathed Realm (3) = 12
+    check sb.milestonesVp == UnscathedRealmVp
+    check sb.bonusVp == 12
+    check sb.totalVp == 39
+
+    # Exercise all 6 milestones: Seven Cities (+3), Unscathed (+3), Master Trader (+2*2=4),
+    # Master Builder (+3), First to 4 Adv (+2), First to 8 Adv (+5) => 20 milestone VP.
+    g.players[0].settlements = MaxSettlements
+    g.players[0].workProgress[2] = GreatWorks[2].builders
+    g.players[0].wares[wtTimber] = wareMaxQty(wtTimber)
+    g.players[0].wares[wtIngots] = wareMaxQty(wtIngots)
+    g.firstTo4AdvOwner = 0
+    g.firstTo8AdvOwner = 0
+    let sbAll = g.computeScoreBreakdown(0)
+    check sbAll.milestonesVp == SevenCitiesVp + UnscathedRealmVp + 2 * MasterTraderPerTrackVp + MasterBuilderVp + FirstTo4AdvVp + FirstTo8AdvVp
+
+    # Losing Unscathed when taking a calamity drops milestone VP by 3.
+    g.players[0].calamities = 1
+    check g.computeScoreBreakdown(0).milestonesVp == sbAll.milestonesVp - UnscathedRealmVp
+
+    # Verify live first-to-4 and first-to-8 advancement triggers via buyAdvancement.
+    let gAdv = make4pGame()
+    for i in 0 ..< 8:
+      gAdv.activePlayerIdx = 0
+      gAdv.phase = phBuy
+      gAdv.boughtAdvThisTurn = false
+      gAdv.turnSilver = 100
+      check gAdv.buyAdvancement(i)
+    check gAdv.firstTo4AdvOwner == 0
+    check gAdv.firstTo8AdvOwner == 0
+    check gAdv.finalRoundTriggered
+
+    # Verify 3D face target Euler angles exist for all 6 faces.
+    for df in DieFace:
+      let (rx, rz) = faceTargetEuler(df)
+      check rx >= -PI and rx <= PI
+      check rz >= -PI and rz <= PI
 
     let gt = make4pGame()
     gt.players[0].wares[wtTimber] = 1

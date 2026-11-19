@@ -6,10 +6,28 @@ import gdext/classes/[
   gdengine,
   gdnode,
   gdnode2d,
+  gdnode3d,
   gdcanvasitem,
   gddisplayserver,
   gdresourceloader,
   gdtexture2d,
+  gdviewport,
+  gdsubviewport,
+  gdviewporttexture,
+  gdcamera3d,
+  gdlight3d,
+  gddirectionallight3d,
+  gdenvironment,
+  gdworldenvironment,
+  gdgeometryinstance3d,
+  gdmeshinstance3d,
+  gdmesh,
+  gdboxmesh,
+  gdplanemesh,
+  gdquadmesh,
+  gdmaterial,
+  gdbasematerial3d,
+  gdstandardmaterial3d,
   gdaudiostream,
   gdaudiostreamplayer,
   gdinputevent,
@@ -36,6 +54,18 @@ type PegsOfUrController* {.gdsync.} = ptr object of Node2D
   grainPegTex: gdref Texture2D
   warePegTex: array[WareType, gdref Texture2D]
   dieFaceTex: array[DieFace, gdref Texture2D]
+
+  diceViewport: SubViewport
+  diceVpTex: gdref Texture2D
+  diceCamera: Camera3D
+  dice3dNodes: array[MaxSettlements, Node3D]
+  diceEnv: gdref Environment
+  diceWoodMat: gdref StandardMaterial3D
+  diceBoxMeshes: array[4, gdref BoxMesh]
+  diceFaceQuad: gdref QuadMesh
+  diceFaceMats: array[DieFace, gdref StandardMaterial3D]
+  diceVpW: int32
+  diceVpH: int32
 
   audioPlayers: array[AudioPoolSize, AudioStreamPlayer]
   audioCursor: int
@@ -146,6 +176,164 @@ proc progressBoxes(prog, total: int): string =
     if (i + 1) mod 5 == 0 and i + 1 < total:
       result.add(" ")
 
+const
+  DiceCamDist = 14.0
+  DiceCamFovDeg = 34.0
+  DiceCamTiltDeg = 13.0
+
+proc init3dDiceRig(self: PegsOfUrController) =
+  if self.headless:
+    return
+
+  let svp = instantiate(SubViewport)
+  svp.setTransparentBackground(true)
+  svp.setUseOwnWorld3D(true)
+  svp.setMsaa3D(msaa4x)
+  svp.setUpdateMode(updateAlways)
+  self.diceVpW = 640
+  self.diceVpH = 246
+  svp.setSize(vector2i(self.diceVpW, self.diceVpH))
+  self.addChild(svp)
+  self.diceViewport = svp
+  self.diceVpTex = svp.getTexture() as gdref Texture2D
+
+  self.diceEnv = instantiate(Environment)
+  self.diceEnv[].setBackground(bgClearColor)
+  self.diceEnv[].setAmbientSource(ambientSourceColor)
+  self.diceEnv[].setAmbientLightColor(color(0.72, 0.62, 0.48, 1.0))
+  self.diceEnv[].setAmbientLightEnergy(0.72)
+  let we = instantiate(WorldEnvironment)
+  we.setEnvironment(self.diceEnv)
+  svp.addChild(we)
+
+  let cam = instantiate(Camera3D)
+  cam.setProjection(projectionPerspective)
+  cam.setFov(DiceCamFovDeg)
+  let tiltRad = DiceCamTiltDeg * PI / 180.0
+  cam.setPosition(vector3(0.0, DiceCamDist * cos(tiltRad), DiceCamDist * sin(tiltRad)))
+  cam.setRotation(vector3(-PI * 0.5 + tiltRad, 0.0, 0.0))
+  svp.addChild(cam)
+  self.diceCamera = cam
+
+  let keyLight = instantiate(DirectionalLight3D)
+  keyLight.setColor(color(1.0, 0.95, 0.86, 1.0))
+  keyLight.setParam(paramEnergy, 1.35)
+  keyLight.setRotationDegrees(vector3(-52.0, -30.0, 0.0))
+  svp.addChild(keyLight)
+
+  let fillLight = instantiate(DirectionalLight3D)
+  fillLight.setColor(color(0.95, 0.80, 0.60, 1.0))
+  fillLight.setParam(paramEnergy, 0.48)
+  fillLight.setRotationDegrees(vector3(-35.0, 145.0, 0.0))
+  svp.addChild(fillLight)
+
+  self.diceWoodMat = instantiate(StandardMaterial3D)
+  self.diceWoodMat[].setAlbedo(color(0.40, 0.23, 0.11, 1.0))
+  self.diceWoodMat[].setRoughness(0.56)
+  self.diceWoodMat[].setMetallic(0.04)
+
+  let boxSizes = [
+    vector3(1.0, 1.0, 1.0),
+    vector3(1.04, 0.88, 0.88),
+    vector3(0.88, 1.04, 0.88),
+    vector3(0.88, 0.88, 1.04),
+  ]
+  for bi in 0 ..< 4:
+    self.diceBoxMeshes[bi] = instantiate(BoxMesh)
+    self.diceBoxMeshes[bi][].setSize(boxSizes[bi])
+
+  self.diceFaceQuad = instantiate(QuadMesh)
+  self.diceFaceQuad[].setSize(vector2(0.88, 0.88))
+
+  for df in DieFace:
+    let fm = instantiate(StandardMaterial3D)
+    fm[].setAlbedo(color(1.0, 0.98, 0.94, 1.0))
+    fm[].setRoughness(0.46)
+    fm[].setMetallic(0.02)
+    if not self.dieFaceTex[df][].isNil:
+      fm[].setTexture(textureAlbedo, self.dieFaceTex[df])
+    self.diceFaceMats[df] = fm
+
+  let faceOffset = 0.522
+  for i in 0 ..< MaxSettlements:
+    let root = instantiate(Node3D)
+    root.setVisible(false)
+
+    # Chamfered hardwood core built from 4 overlapping boxes so edges catch 3D highlights.
+    for bi in 0 ..< 4:
+      let bodyMesh = instantiate(MeshInstance3D)
+      bodyMesh.setMesh(self.diceBoxMeshes[bi] as gdref Mesh)
+      bodyMesh.setMaterialOverride(self.diceWoodMat as gdref Material)
+      root.addChild(bodyMesh)
+
+    # 6 carved face plates aligned so each faceTargetEuler(df) brings df upright to +Y.
+    for df in DieFace:
+      let plate = instantiate(MeshInstance3D)
+      plate.setMesh(self.diceFaceQuad as gdref Mesh)
+      plate.setMaterialOverride(self.diceFaceMats[df] as gdref Material)
+      case df
+      of dfGrain3:
+        plate.setPosition(vector3(0.0, faceOffset, 0.0))
+        plate.setRotation(vector3(-PI * 0.5, 0.0, 0.0))
+      of dfSilver7:
+        plate.setPosition(vector3(0.0, -faceOffset, 0.0))
+        plate.setRotation(vector3(PI * 0.5, 0.0, 0.0))
+      of dfWare1:
+        plate.setPosition(vector3(0.0, 0.0, faceOffset))
+        plate.setRotation(vector3(0.0, 0.0, 0.0))
+      of dfBuilders3:
+        plate.setPosition(vector3(0.0, 0.0, -faceOffset))
+        plate.setRotation(vector3(PI, 0.0, 0.0))
+      of dfOmenWares2:
+        let b = basis(vector3(0.0, -1.0, 0.0), vector3(0.0, 0.0, -1.0), vector3(1.0, 0.0, 0.0))
+        plate.setTransform(transform3D(b, vector3(faceOffset, 0.0, 0.0)))
+      of dfGrainOrBuilders2:
+        let b = basis(vector3(0.0, 1.0, 0.0), vector3(0.0, 0.0, -1.0), vector3(-1.0, 0.0, 0.0))
+        plate.setTransform(transform3D(b, vector3(-faceOffset, 0.0, 0.0)))
+      root.addChild(plate)
+
+    svp.addChild(root)
+    self.dice3dNodes[i] = root
+
+proc sync3dDice(self: PegsOfUrController) =
+  if self.headless or self.diceViewport.isNil or self.presenter.isNil:
+    return
+  let tray = self.presenter.tray
+  let rc = tray.rect
+  let targetW = max(120'i32, int32(rc.w))
+  let targetH = max(90'i32, int32(rc.h))
+  if targetW != self.diceVpW or targetH != self.diceVpH:
+    self.diceVpW = targetW
+    self.diceVpH = targetH
+    self.diceViewport.setSize(vector2i(targetW, targetH))
+
+  let halfFovRad = (DiceCamFovDeg * 0.5) * PI / 180.0
+  let visH = 2.0 * DiceCamDist * tan(halfFovRad)
+  let worldPerPx = visH / max(1.0, rc.h)
+  let dieW = tray.effectiveDieSize()
+  let cubeScale = dieW * worldPerPx * 0.86
+  let centerX = rc.x + rc.w * 0.5
+  let centerY = rc.y + rc.h * 0.5
+
+  for i in 0 ..< MaxSettlements:
+    let node = self.dice3dNodes[i]
+    if node.isNil:
+      continue
+    if i >= tray.dice.len:
+      node.setVisible(false)
+      continue
+    let d = tray.dice[i]
+    if d.delay > 0.0 and not d.settled:
+      node.setVisible(false)
+      continue
+    node.setVisible(true)
+    let wx = (d.posX - centerX) * worldPerPx
+    let wz = (d.posY - centerY) * worldPerPx
+    let wy = cubeScale * 0.5 + d.z * worldPerPx * 0.72
+    node.setPosition(vector3(wx, wy, wz))
+    node.setScale(vector3(cubeScale, cubeScale, cubeScale))
+    node.setRotation(vector3(d.rotX, d.rotY, d.rotZ))
+
 method ready*(self: PegsOfUrController) {.gdsync.} =
   self.rng = initRand(hardwareOrTimerSeed64())
   self.headless = ($DisplayServer.singleton.getName() == "headless")
@@ -187,6 +375,8 @@ method ready*(self: PegsOfUrController) {.gdsync.} =
   let w = if vp.size.x > 200.0: float(vp.size.x) else: 1680.0
   let h = if vp.size.y > 200.0: float(vp.size.y) else: 960.0
   self.presenter = newPegsOfUrPresenter(w, h, showSetupModal = not self.headless)
+  self.init3dDiceRig()
+  self.sync3dDice()
   for ev in self.presenter.popAudioEvents():
     self.dispatchAudioEvent(ev)
   self.queueRedraw()
@@ -203,6 +393,7 @@ method process*(self: PegsOfUrController; delta: float64) {.gdsync.} =
       self.presenter.rebuildButtons()
 
   self.presenter.tick(float(delta))
+  self.sync3dDice()
   for ev in self.presenter.popAudioEvents():
     self.dispatchAudioEvent(ev)
   self.queueRedraw()
@@ -373,10 +564,14 @@ proc drawDiceTray(self: PegsOfUrController; font: gdref Font) =
       continue
     let zNorm = clamp(d.z / 100.0, 0.0, 1.0)
     let sw = dieW * (0.96 - zNorm * 0.22)
-    let sa = 0.42 - zNorm * 0.26
-    self.drawSetTransform(vector2(d.posX + 5.0 + d.z * 0.24, d.posY + 7.0 + d.z * 0.30), d.angle, vector2(1.0, 1.0))
+    let sa = 0.44 - zNorm * 0.26
+    self.drawSetTransform(vector2(d.posX + 6.0 + d.z * 0.24, d.posY + 8.0 + d.z * 0.30), d.angle, vector2(1.0, 1.0))
     self.drawRect(rect2(-sw * 0.48, -sw * 0.48, sw * 0.96, sw * 0.96), color(0.05, 0.02, 0.01, sa), filled = true)
     self.drawSetTransform(vector2(0.0, 0.0), 0.0, vector2(1.0, 1.0))
+
+  let use3dDice = (not self.headless) and (not self.diceViewport.isNil) and (not self.diceVpTex[].isNil)
+  if use3dDice:
+    self.drawTextureRect(self.diceVpTex, rc.toGdRect(), tile = false)
 
   for i, d in tray.dice:
     if d.delay > 0.0 and not d.settled:
@@ -387,10 +582,11 @@ proc drawDiceTray(self: PegsOfUrController; font: gdref Font) =
     let cy = d.posY - d.z * 0.55
 
     self.drawSetTransform(vector2(cx, cy), d.angle, vector2(1.0, 1.0))
-    let dRect = rect2(-dw * 0.5, -dw * 0.5, dw, dw)
-    let tex = self.dieFaceTex[d.displayFace]
-    if not tex[].isNil:
-      self.drawTextureRect(tex, dRect, tile = false)
+    if not use3dDice:
+      let dRect = rect2(-dw * 0.5, -dw * 0.5, dw, dw)
+      let tex = self.dieFaceTex[d.displayFace]
+      if not tex[].isNil:
+        self.drawTextureRect(tex, dRect, tile = false)
 
     if d.settled:
       let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
@@ -463,7 +659,7 @@ proc drawModal(self: PegsOfUrController; font: gdref Font) =
   case p.modal
   of mkSetup:
     self.drawText(font, mr.x + 20.0, mr.y + 36.0, "PEGS OF UR — CRADLE OF REALMS", 20, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
-    self.drawText(font, mr.x + 20.0, mr.y + 62.0, "Configure 1 to 4 City-State Realms (1 Active Seat = 10-Round Solo Chronicle)", 12, color(0.86, 0.78, 0.64, 1.0), mr.w - 40.0, horizontalAlignmentCenter)
+    self.drawText(font, mr.x + 20.0, mr.y + 62.0, fmt"Configure 1 to 4 City-State Realms (1 Active Seat = {SoloMaxRounds}-Round Solo Chronicle)", 12, color(0.86, 0.78, 0.64, 1.0), mr.w - 40.0, horizontalAlignmentCenter)
     for i in 0 ..< 4:
       let ry = mr.y + 92.0 + float(i) * 46.0
       self.drawRect(rect2(mr.x + 26.0, ry + 3.0, 14.0, 28.0), RealmDefaults[i].color.toGdColor(), filled = true)
@@ -486,21 +682,23 @@ proc drawModal(self: PegsOfUrController; font: gdref Font) =
       "   • 5+ Omens (Uprising): Lose ALL stored Wares (with Priesthood, rivals without Priesthood lose all Wares!).",
       "4. CONSTRUCT: Spend Builders on Settlements (costs 3,4,5,6) and Great Works. First finisher claims top Renown.",
       "5. UNLOCK 1 ADVANCEMENT: Spend turn Silver + Ware tracks (whole-track rule: all pegs in a spent row reset to 0).",
-      "6. STORAGE & END OF ERA: Keep at most 6 Wares unless holding Merchant Fleets. Equal-turns final round triggers",
-      "   when any realm unlocks 5 Advancements or every active Great Work stands complete (or Round 10 in Solo).",
+      "6. MILESTONE BONUSES: Seven Cities (+3 VP at 7/7 dice), Unscathed (+3 VP for 0 Calamities), Master Trader",
+      "   (+2 VP per maxed Ware track), Master Builder (+3 VP for 3+ Great Works), 1st to 4 Adv (+2 VP), 1st to 8 (+5 VP).",
+      "7. STORAGE & END OF ERA: Keep at most 6 Wares unless holding Merchant Fleets. Equal-turns final round triggers",
+      fmt"   when any realm unlocks {AdvEndTrigger} Advancements or every active Great Work stands complete (or Round {SoloMaxRounds} in Solo).",
       "   Tiebreaker: highest Silver value of remaining Wares on your Pegboard.",
     ]
-    var ly = mr.y + 72.0
+    var ly = mr.y + 68.0
     for ln in lines:
-      self.drawText(font, mr.x + 28.0, ly, ln, 13, color(0.94, 0.88, 0.76, 1.0))
-      ly += 30.0
+      self.drawText(font, mr.x + 28.0, ly, ln, 12, color(0.94, 0.88, 0.76, 1.0))
+      ly += 27.0
 
   of mkGameOver:
     self.drawText(font, mr.x + 20.0, mr.y + 36.0, "ERA COMPLETE — FINAL REALM STANDINGS", 19, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
     let standings = p.game.getStandings()
     if standings.len > 0:
       let sub =
-        if p.game.isSolo(): fmt"10-Round Solo Renown: {standings[0].totalVp} VP  (Remaining Wares: {standings[0].tiebreakerWaresValue}s)"
+        if p.game.isSolo(): fmt"{SoloMaxRounds}-Round Solo Renown: {standings[0].totalVp} VP  (Remaining Wares: {standings[0].tiebreakerWaresValue}s)"
         else: fmt"Sovereign Victor: {standings[0].name} with {standings[0].totalVp} Renown!  ({p.game.finalTriggerReason})"
       self.drawText(font, mr.x + 20.0, mr.y + 64.0, sub, 14, color(0.90, 0.82, 0.66, 1.0), mr.w - 40.0, horizontalAlignmentCenter)
 
@@ -572,7 +770,7 @@ method draw*(self: PegsOfUrController) {.gdsync.} =
 
   let sc = p.settlementsCardRect()
   self.drawWoodCard(sc, color(0.92, 0.85, 0.71, 0.96), color(0.42, 0.26, 0.12, 0.92))
-  self.drawText(font, sc.x + 12.0, sc.y + 20.0, fmt"SETTLEMENTS (Founded: {vp.settlements} / 7 • 1 Grain & 1 Die per Settlement)", 12, color(0.20, 0.10, 0.03, 1.0))
+  self.drawText(font, sc.x + 12.0, sc.y + 20.0, fmt"SETTLEMENTS (Founded: {vp.settlements} / 7 • 1 Grain & 1 Die each • 7/7 = +{SevenCitiesVp} VP)", 12, color(0.20, 0.10, 0.03, 1.0))
   self.drawText(font, sc.x + 12.0, sc.y + 39.0, "Home Settlements 1–3: [■] [■] [■] Founded", 11, color(0.28, 0.16, 0.06, 1.0))
   for slot in 0 ..< 4:
     let sNum = 4 + slot
@@ -665,7 +863,7 @@ method draw*(self: PegsOfUrController) {.gdsync.} =
 
   let aa = p.advancementsAreaRect()
   self.drawLine(vector2(rCol.x + 14.0, aa.y - 26.0), vector2(rCol.x + rCol.w - 14.0, aa.y - 26.0), color(0.42, 0.26, 0.12, 0.55), 1.5)
-  self.drawText(font, rCol.x + 14.0, aa.y - 8.0, "CIVIC ADVANCEMENTS (Scroll Wheel • Max 1/Turn • 5 Triggers Final Round)", 12, color(0.20, 0.10, 0.03, 1.0))
+  self.drawText(font, rCol.x + 14.0, aa.y - 8.0, fmt"CIVIC ADVANCEMENTS (Scroll • 1/Turn • 1st to 4:+{FirstTo4AdvVp}VP, 8:+{FirstTo8AdvVp}VP & End)", 12, color(0.20, 0.10, 0.03, 1.0))
 
   let rowStride = 44.0
   for aIdx in 0 ..< Advancements.len:

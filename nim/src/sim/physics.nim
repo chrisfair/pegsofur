@@ -14,6 +14,8 @@ type
     velX*, velY*: float
     z*, vz*: float
     angle*, angVel*: float
+    rotX*, rotY*, rotZ*: float
+    velRotX*, velRotY*, velRotZ*: float
     displayFace*: DieFace
     targetFace*: DieFace
     delay*: float
@@ -37,6 +39,23 @@ type
     warePosY*: array[WareType, float]
     initialized*: bool
     hoveredWareRow*: int
+
+proc faceTargetEuler*(face: DieFace): tuple[rx, rz: float] {.inline.} =
+  case face
+  of dfGrain3: (0.0, 0.0)
+  of dfWare1: (-PI * 0.5, 0.0)
+  of dfOmenWares2: (0.0, PI * 0.5)
+  of dfBuilders3: (PI * 0.5, 0.0)
+  of dfGrainOrBuilders2: (0.0, -PI * 0.5)
+  of dfSilver7: (PI, 0.0)
+
+proc wrapAngleDelta(target, current: float): float {.inline.} =
+  var d = (target - current) mod (2.0 * PI)
+  if d > PI:
+    d -= 2.0 * PI
+  elif d < -PI:
+    d += 2.0 * PI
+  d
 
 proc newDiceTraySim*(seed: int64 = -1; tpmPath: string = DefaultTpmDevice): DiceTraySim =
   let actualSeed = if seed >= 0: seed else: hardwareOrTimerSeed64(tpmPath)
@@ -81,14 +100,22 @@ proc recomputeHomeSlots*(tray: DiceTraySim; snapImmediately: bool) =
       tray.dice[i].posX = sx
       tray.dice[i].posY = centerY
       tray.dice[i].angle = 0.0
+      let (tx, tz) = faceTargetEuler(tray.dice[i].targetFace)
+      tray.dice[i].rotX = tx
+      tray.dice[i].rotY = 0.0
+      tray.dice[i].rotZ = tz
 
 proc syncDiceTargets*(tray: DiceTraySim; faces: openArray[DieFace]) =
   if tray.dice.len != faces.len:
     tray.dice.setLen(faces.len)
     for i, f in faces:
+      let (tx, tz) = faceTargetEuler(f)
       tray.dice[i] = DieBody(
         displayFace: f,
         targetFace: f,
+        rotX: tx,
+        rotY: 0.0,
+        rotZ: tz,
         settled: true,
       )
     tray.recomputeHomeSlots(snapImmediately = true)
@@ -97,6 +124,10 @@ proc syncDiceTargets*(tray: DiceTraySim; faces: openArray[DieFace]) =
       tray.dice[i].targetFace = f
       if tray.dice[i].settled:
         tray.dice[i].displayFace = f
+        let (tx, tz) = faceTargetEuler(f)
+        tray.dice[i].rotX = tx
+        tray.dice[i].rotY = 0.0
+        tray.dice[i].rotZ = tz
     tray.recomputeHomeSlots(snapImmediately = false)
 
 proc triggerRoll*(tray: DiceTraySim; rolledIndices: openArray[int]; faces: openArray[DieFace]) =
@@ -125,6 +156,12 @@ proc triggerRoll*(tray: DiceTraySim; rolledIndices: openArray[int]; faces: openA
     d.vz = tray.rng.rand(65.0 .. 160.0)
     d.angle = tray.rng.rand(-PI .. PI)
     d.angVel = tray.rng.rand(-13.0 .. 13.0)
+    d.rotX = tray.rng.rand(-PI .. PI)
+    d.rotY = tray.rng.rand(-PI .. PI)
+    d.rotZ = tray.rng.rand(-PI .. PI)
+    d.velRotX = tray.rng.rand(-14.0 .. 14.0)
+    d.velRotY = tray.rng.rand(-10.0 .. 10.0)
+    d.velRotZ = tray.rng.rand(-14.0 .. 14.0)
     d.flipTimer = 0.0
     tray.dice[idx] = d
 
@@ -164,6 +201,9 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
       d.posY += d.velY * dt
       d.z += d.vz * dt
       d.angle += d.angVel * dt
+      d.rotX += d.velRotX * dt
+      d.rotY += d.velRotY * dt
+      d.rotZ += d.velRotZ * dt
 
       let minX = inner.x + radius
       let maxX = inner.x + inner.w - radius
@@ -210,11 +250,17 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
           d.velX *= 0.68
           d.velY *= 0.68
           d.angVel = d.angVel * 0.64 + tray.rng.rand(-2.2 .. 2.2)
+          d.velRotX = d.velRotX * 0.58 + tray.rng.rand(-3.5 .. 3.5)
+          d.velRotY = d.velRotY * 0.58 + tray.rng.rand(-2.5 .. 2.5)
+          d.velRotZ = d.velRotZ * 0.58 + tray.rng.rand(-3.5 .. 3.5)
         else:
           d.vz = 0.0
           d.velX = 0.0
           d.velY = 0.0
           d.angVel = 0.0
+          d.velRotX = 0.0
+          d.velRotY = 0.0
+          d.velRotZ = 0.0
           d.displayFace = d.targetFace
           d.settled = true
           if d.targetFace == dfOmenWares2 and d.wasRolled:
@@ -227,6 +273,10 @@ proc stepTray*(tray: DiceTraySim; delta: float; audioOut: var seq[AudioEvent]) =
       d.posX += (d.homeX - d.posX) * s
       d.posY += (d.homeY - d.posY) * s
       d.angle += (0.0 - d.angle) * s
+      let (tx, tz) = faceTargetEuler(d.targetFace)
+      d.rotX += wrapAngleDelta(tx, d.rotX) * s
+      d.rotY += wrapAngleDelta(0.0, d.rotY) * s
+      d.rotZ += wrapAngleDelta(tz, d.rotZ) * s
 
     tray.dice[i] = d
 

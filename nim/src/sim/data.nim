@@ -92,8 +92,18 @@ const
   InitialSettlements* = 3
   MaxSettlements* = 7
   DefaultWaresLimit* = 6
-  SoloMaxRounds* = 10
-  AdvEndTrigger* = 5
+  SoloMaxRounds* = 14
+  AdvEndTrigger* = 8
+
+  SevenCitiesVp* = 3
+  UnscathedRealmVp* = 3
+  MasterTraderPerTrackVp* = 2
+  MasterBuilderWorkCount* = 3
+  MasterBuilderVp* = 3
+  FirstTo4AdvCount* = 4
+  FirstTo4AdvVp* = 2
+  FirstTo8AdvCount* = 8
+  FirstTo8AdvVp* = 5
 
   SettlementCosts*: array[4, int] = [3, 4, 5, 6]
 
