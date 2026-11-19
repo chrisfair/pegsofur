@@ -59,7 +59,9 @@ type PegsOfUrController* {.gdsync.} = ptr object of Node2D
   diceVpTex: gdref Texture2D
   diceCamera: Camera3D
   dice3dNodes: array[MaxSettlements, Node3D]
-  dice3dOutlines: array[MaxSettlements, MeshInstance3D]
+  dice3dBlue: array[MaxSettlements, MeshInstance3D]
+  dice3dRed: array[MaxSettlements, MeshInstance3D]
+  dice3dHover: array[MaxSettlements, MeshInstance3D]
   diceEnv: gdref Environment
   diceWoodMat: gdref StandardMaterial3D
   diceCoreBox: gdref BoxMesh
@@ -275,12 +277,26 @@ proc init3dDiceRig(self: PegsOfUrController) =
     bodyMesh.setMaterialOverride(self.diceWoodMat as gdref Material)
     root.addChild(bodyMesh)
 
-    let outlineMesh = instantiate(MeshInstance3D)
-    outlineMesh.setMesh(self.diceOutlineBox as gdref Mesh)
-    outlineMesh.setMaterialOverride(self.diceGlowBlueMat as gdref Material)
-    outlineMesh.setVisible(false)
-    root.addChild(outlineMesh)
-    self.dice3dOutlines[i] = outlineMesh
+    let blueMesh = instantiate(MeshInstance3D)
+    blueMesh.setMesh(self.diceOutlineBox as gdref Mesh)
+    blueMesh.setMaterialOverride(self.diceGlowBlueMat as gdref Material)
+    blueMesh.setVisible(false)
+    root.addChild(blueMesh)
+    self.dice3dBlue[i] = blueMesh
+
+    let redMesh = instantiate(MeshInstance3D)
+    redMesh.setMesh(self.diceOutlineBox as gdref Mesh)
+    redMesh.setMaterialOverride(self.diceGlowRedMat as gdref Material)
+    redMesh.setVisible(false)
+    root.addChild(redMesh)
+    self.dice3dRed[i] = redMesh
+
+    let hoverMesh = instantiate(MeshInstance3D)
+    hoverMesh.setMesh(self.diceOutlineBox as gdref Mesh)
+    hoverMesh.setMaterialOverride(self.diceGlowHoverMat as gdref Material)
+    hoverMesh.setVisible(false)
+    root.addChild(hoverMesh)
+    self.dice3dHover[i] = hoverMesh
 
     # 6 carved face plates flush against the cube, aligned so faceTargetEuler(df) brings df upright to +Y.
     for df in DieFace:
@@ -350,25 +366,26 @@ proc sync3dDice(self: PegsOfUrController) =
     node.setScale(vector3(cubeScale, cubeScale, cubeScale))
     node.setRotation(vector3(d.rotX, d.rotY, d.rotZ))
 
-    let outline = self.dice3dOutlines[i]
-    if not outline.isNil:
+    var showBlue = false
+    var showRed = false
+    var showHover = false
+    if d.settled:
       let p = self.presenter
-      if d.settled:
-        let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
-        let lockedOmen = (d.displayFace == dfOmenWares2 and not p.game.isSolo() and p.game.phase == phRoll)
-        if (p.divinationArmed and tray.hoveredDie == i) or selReroll:
-          outline.setMaterialOverride(self.diceGlowBlueMat as gdref Material)
-          outline.setVisible(true)
-        elif lockedOmen:
-          outline.setMaterialOverride(self.diceGlowRedMat as gdref Material)
-          outline.setVisible(true)
-        elif tray.hoveredDie == i and p.isDieClickable(i):
-          outline.setMaterialOverride(self.diceGlowHoverMat as gdref Material)
-          outline.setVisible(true)
-        else:
-          outline.setVisible(false)
-      else:
-        outline.setVisible(false)
+      let selReroll = (i < p.game.diceSelectedForReroll.len and p.game.diceSelectedForReroll[i] and p.game.phase == phRoll)
+      let lockedOmen = (d.displayFace == dfOmenWares2 and not p.game.isSolo() and p.game.phase == phRoll)
+      if (p.divinationArmed and tray.hoveredDie == i) or selReroll:
+        showBlue = true
+      elif lockedOmen:
+        showRed = true
+      elif tray.hoveredDie == i and p.isDieClickable(i):
+        showHover = true
+
+    if not self.dice3dBlue[i].isNil:
+      self.dice3dBlue[i].setVisible(showBlue)
+    if not self.dice3dRed[i].isNil:
+      self.dice3dRed[i].setVisible(showRed)
+    if not self.dice3dHover[i].isNil:
+      self.dice3dHover[i].setVisible(showHover)
 
 method ready*(self: PegsOfUrController) {.gdsync.} =
   self.rng = initRand(hardwareOrTimerSeed64())
