@@ -783,3 +783,116 @@ suite "Pegs of Ur Online, Quota, Standings & Support":
         discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
         break
     check pr.profile.supported
+
+  test "two-player online room join via keyboard input and live turn synchronization":
+    var sharedMoves = newJArray()
+    var sharedSeq = 0
+    var sharedPlayers = %*[
+      {"seat": 0, "displayName": "Ur"},
+      {"seat": 1, "displayName": "Byblos"},
+    ]
+    let roomServer: HttpTransport = proc(httpMethod, url, body: string): HttpResponseData =
+      if "/v1/rooms/join" in url:
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"code":"UR9999","seat":1,"seatToken":"tokB","seed":12345,"status":"active","dailyUsed":1}""")
+      if "/v1/rooms/move" in url:
+        let j = parseJson(body)
+        inc sharedSeq
+        let seat = if j["seatToken"].getStr() == "tokA": 0 else: 1
+        sharedMoves.add(%*{
+          "seq": sharedSeq,
+          "seat": seat,
+          "action": j["action"].getStr(),
+          "payload": j["payload"],
+        })
+        return HttpResponseData(statusCode: 200, ok: true, body: $(%*{"ok": true, "turnSeq": sharedSeq}))
+      if "/v1/rooms" in url and httpMethod == "POST":
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"code":"UR9999","seat":0,"seatToken":"tokA","seed":12345,"status":"waiting","dailyUsed":1}""")
+      if "/v1/rooms" in url and httpMethod == "GET":
+        let resp = %*{
+          "ok": true,
+          "code": "UR9999",
+          "hostName": "Ur",
+          "maxPlayers": 2,
+          "status": "active",
+          "seed": 12345,
+          "turnSeq": sharedSeq,
+          "players": sharedPlayers,
+          "moves": sharedMoves,
+        }
+        return HttpResponseData(statusCode: 200, ok: true, body: $resp)
+      HttpResponseData(statusCode: 404, ok: false, body: """{"error":"not found"}""")
+
+    var p1 = newPegsOfUrPresenter(1680.0, 960.0, seed = 1, showSetupModal = false)
+    p1.profile = initDefaultProfile()
+    p1.profile.displayName = "Ur"
+    p1.httpTransport = roomServer
+
+    var p2 = newPegsOfUrPresenter(1680.0, 960.0, seed = 2, showSetupModal = false)
+    p2.profile = initDefaultProfile()
+    p2.profile.displayName = "Byblos"
+    p2.httpTransport = roomServer
+
+    # P1 creates room
+    p1.modal = mkOnlineLobby
+    p1.rebuildButtons()
+    for b in p1.buttons:
+      if b.action == baCreateOnlineRoom:
+        discard p1.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check p1.onlineRoom.code == "UR9999"
+
+    # P2 types room code with keyboard + backspace correction and joins
+    p2.modal = mkOnlineLobby
+    for ch in "ur999x":
+      check p2.onKeyChar(ch)
+    check p2.onKeyBackspace()
+    check p2.onKeyChar('9')
+    check p2.joinCodeInput == "UR9999"
+    p2.rebuildButtons()
+    for b in p2.buttons:
+      if b.action == baJoinOnlineRoom:
+        discard p2.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check p2.onlineRoom.code == "UR9999"
+    check p2.onlineRoom.seat == 1
+
+    # P1 polls & both enter synchronized online match
+    discard p1.syncOnlineRoom()
+    p1.rebuildButtons()
+    for b in p1.buttons:
+      if b.action == baStartOnlineMatch:
+        discard p1.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    p2.rebuildButtons()
+    for b in p2.buttons:
+      if b.action == baStartOnlineMatch:
+        discard p2.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check p1.onlineMatchActive and p2.onlineMatchActive
+    check p1.game.diceFaces == p2.game.diceFaces
+
+    # Let opening dice bounce settle on both clients
+    for _ in 0 ..< 160:
+      if not p1.tray.isAnimating() and not p2.tray.isAnimating():
+        break
+      p1.tick(0.05)
+      p2.tick(0.05)
+
+    # P2 cannot act during P1's turn
+    p2.rebuildButtons()
+    for b in p2.buttons:
+      if b.action == baKeepDiceAndHarvest:
+        check not p2.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+
+    # P1 keeps dice & harvests -> P2 auto-polls in tick() and stays in exact sync
+    p1.rebuildButtons()
+    for b in p1.buttons:
+      if b.action == baKeepDiceAndHarvest:
+        check p1.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check sharedSeq >= 1
+    for _ in 0 ..< 20:
+      p2.tick(0.1)
+    check p2.appliedMoveSeq == sharedSeq
+    check p2.game.phase == p1.game.phase

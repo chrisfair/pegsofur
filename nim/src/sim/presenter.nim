@@ -1,6 +1,6 @@
 ## Pure-Nim tabletop UI layout, button synthesis, input handling, and presenter state.
 
-import std/[strformat]
+import std/[json, strformat, strutils]
 import data, game, ai, physics, online
 
 type
@@ -48,6 +48,8 @@ type
     baToggleStandingsMode
     baOpenOnlineLobby
     baCreateOnlineRoom
+    baJoinOnlineRoom
+    baStartOnlineMatch
     baPollOnlineRoom
     baOpenSupport
     baOpenStripeSupport1
@@ -105,6 +107,11 @@ type
     standingsMode*: string
     onlineRoom*: OnlineRoomState
     onlineStatusMsg*: string
+    joinCodeInput*: string
+    onlineMatchActive*: bool
+    appliedMoveSeq*: int
+    onlinePollTimer*: float
+    replayingRemote*: bool
     pendingExternalUrl*: string
     httpTransport*: HttpTransport
 
@@ -340,12 +347,15 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
       p.addBtn(uiRect(mr.x + (mr.w - 180.0) * 0.5, mr.y + mr.h - 50.0, 180.0, 36.0), "Close", baCloseModal, accentBg, goldHi)
 
     of mkOnlineLobby:
-      let rowY = mr.y + 112.0
-      p.addBtn(uiRect(mr.x + 28.0, rowY, 190.0, 36.0), "Create 2P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 2)
-      p.addBtn(uiRect(mr.x + 230.0, rowY, 190.0, 36.0), "Create 4P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 4)
-      p.addBtn(uiRect(mr.x + 432.0, rowY, 145.0, 36.0), "Refresh Room", baPollOnlineRoom, warmBg, brass, enabled = p.onlineRoom.code.len == 6)
+      let rowY = mr.y + 104.0
+      p.addBtn(uiRect(mr.x + 28.0, rowY, 175.0, 34.0), "Create 2P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 2)
+      p.addBtn(uiRect(mr.x + 213.0, rowY, 175.0, 34.0), "Create 4P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 4)
+      p.addBtn(uiRect(mr.x + 398.0, rowY, 138.0, 34.0), "Refresh Room", baPollOnlineRoom, warmBg, brass, enabled = p.onlineRoom.code.len == 6)
       if not p.profile.isMicrosoftStore and not p.profile.isUnlimitedOnline():
-        p.addBtn(uiRect(mr.x + 589.0, rowY, 143.0, 36.0), "Unlock Unlimited", baOpenSupport, warmBg, goldHi)
+        p.addBtn(uiRect(mr.x + 546.0, rowY, 186.0, 34.0), "Unlock Unlimited", baOpenSupport, warmBg, goldHi)
+      let joinY = mr.y + 150.0
+      p.addBtn(uiRect(mr.x + 290.0, joinY, 150.0, 34.0), "Join Room", baJoinOnlineRoom, accentBg, goldHi, enabled = p.joinCodeInput.len == 6)
+      p.addBtn(uiRect(mr.x + 452.0, joinY, 210.0, 34.0), "Enter Online Match", baStartOnlineMatch, accentBg, goldHi, enabled = p.onlineRoom.code.len == 6 and p.onlineRoom.players.len >= 2)
       p.addBtn(uiRect(mr.x + (mr.w - 180.0) * 0.5, mr.y + mr.h - 50.0, 180.0, 36.0), "Close", baCloseModal, accentBg, goldHi)
 
     of mkSupport:
@@ -597,8 +607,43 @@ proc selectAdvForCustomPay*(p: PegsOfUrPresenter; advIdx: int) =
       p.buyWaresMask[wt] = false
     p.buySiloGrain = 0
 
+proc isGameplayAction(a: ButtonAction): bool =
+  a in {
+    baRollSelected, baSelectAllRerollable, baToggleDivination, baKeepDiceAndHarvest,
+    baFlipChoiceDie, baConfirmChoices, baBuildSettlementOne, baBuildSettlementFinish,
+    baBuildWorkOne, baBuildWorkBulk, baConvertCranes, baResetBuild, baFinishBuilding,
+    baAutoBuyAdv, baConfirmCustomBuy, baSkipBuying, baDiscardWare,
+  }
+
+proc parseButtonAction(name: string): ButtonAction =
+  for a in ButtonAction:
+    if $a == name:
+      return a
+  baNone
+
+proc onKeyChar*(p: PegsOfUrPresenter; ch: char): bool =
+  if p.modal != mkOnlineLobby:
+    return false
+  let up = ch.toUpperAscii()
+  if up in {'A'..'Z', '0'..'9'} and p.joinCodeInput.len < 6:
+    p.joinCodeInput.add(up)
+    p.rebuildButtons()
+    return true
+  false
+
+proc onKeyBackspace*(p: PegsOfUrPresenter): bool =
+  if p.modal != mkOnlineLobby or p.joinCodeInput.len == 0:
+    return false
+  p.joinCodeInput.setLen(p.joinCodeInput.len - 1)
+  p.rebuildButtons()
+  true
+
 proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
   if not btn.enabled:
+    return false
+  if p.onlineMatchActive and not p.replayingRemote and isGameplayAction(btn.action) and
+      p.game.activePlayerIdx != p.onlineRoom.seat:
+    p.onlineStatusMsg = "Waiting for remote opponent's turn..."
     return false
   case btn.action
   of baNone:
@@ -680,6 +725,37 @@ proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
     else:
       p.onlineStatusMsg = fmt"Room {p.onlineRoom.code} created! Share this code with friends."
       discard saveProfile(p.profile)
+    p.pushAudio(akUiTap)
+  of baJoinOnlineRoom:
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    p.onlineRoom = joinOnlineRoom(p.profile, p.joinCodeInput, DefaultApiBase, tr)
+    if p.onlineRoom.lastError.len > 0:
+      p.onlineStatusMsg = p.onlineRoom.lastError
+    else:
+      discard pollOnlineRoom(p.onlineRoom, DefaultApiBase, tr)
+      p.onlineStatusMsg = fmt"Joined room {p.onlineRoom.code} as Seat {p.onlineRoom.seat + 1}!"
+      discard saveProfile(p.profile)
+    p.pushAudio(akUiTap)
+  of baStartOnlineMatch:
+    if p.onlineRoom.code.len == 6 and p.onlineRoom.players.len >= 2:
+      var seats: array[4, SeatConfig]
+      for k in 0 .. 3:
+        seats[k] = SeatConfig(name: RealmNamePool[k], seatType: stClosed)
+      for idx, pl in p.onlineRoom.players:
+        if idx < 4:
+          seats[idx] = SeatConfig(name: pl.displayName, seatType: stHuman)
+      p.game = newPegsOfUrGame(seed = int64(max(1, p.onlineRoom.seed)))
+      p.game.startGame(seats)
+      p.viewedPlayerIdx = clamp(p.onlineRoom.seat, 0, p.game.players.len - 1)
+      p.followActivePlayer = true
+      p.selectedBuyAdv = -1
+      p.divinationArmed = false
+      p.lastSyncedRollSeq = -1
+      p.onlineMatchActive = true
+      p.appliedMoveSeq = 0
+      p.onlinePollTimer = 0.0
+      p.modal = mkNone
+      p.onlineStatusMsg = fmt"Online match live in Room {p.onlineRoom.code} (Seat {p.onlineRoom.seat + 1})."
     p.pushAudio(akUiTap)
   of baPollOnlineRoom:
     let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
@@ -829,9 +905,38 @@ proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
     if p.game.discardOneWare(WareType(btn.intParam)):
       p.pushAudio(akPegTap, 0.85, 0.88)
 
+  if p.onlineMatchActive and not p.replayingRemote and isGameplayAction(btn.action):
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    if submitOnlineMove(p.onlineRoom, $btn.action, %*{"p1": btn.intParam, "p2": btn.intParam2}, DefaultApiBase, tr):
+      p.appliedMoveSeq = p.onlineRoom.turnSeq
+
   p.syncFromGame()
   p.rebuildButtons()
   true
+
+proc syncOnlineRoom*(p: PegsOfUrPresenter): int =
+  if p.onlineRoom.code.len != 6:
+    return 0
+  let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+  if not pollOnlineRoom(p.onlineRoom, DefaultApiBase, tr):
+    return 0
+  if not p.onlineMatchActive:
+    p.rebuildButtons()
+    return 0
+  var applied = 0
+  for m in p.onlineRoom.moves:
+    if m.seqNum <= p.appliedMoveSeq:
+      continue
+    p.appliedMoveSeq = m.seqNum
+    if m.seat == p.onlineRoom.seat:
+      continue
+    let act = parseButtonAction(m.action)
+    if act != baNone:
+      p.replayingRemote = true
+      discard p.executeButtonAction(UiButton(action: act, intParam: m.p1, intParam2: m.p2, enabled: true))
+      p.replayingRemote = false
+      inc applied
+  applied
 
 proc onMouseMove*(p: PegsOfUrPresenter; mx, my: float) =
   p.hoveredButtonIdx = -1
@@ -917,6 +1022,18 @@ proc tick*(p: PegsOfUrPresenter; delta: float) =
         p.syncFromGame()
         p.rebuildButtons()
         return
+
+  if p.onlineMatchActive and p.game.phase notin {phSetup, phGameOver} and
+      p.game.activePlayerIdx != p.onlineRoom.seat:
+    p.onlinePollTimer += dt
+    if p.onlinePollTimer >= 1.5:
+      p.onlinePollTimer = 0.0
+      discard p.syncOnlineRoom()
+  elif p.modal == mkOnlineLobby and p.onlineRoom.code.len == 6:
+    p.onlinePollTimer += dt
+    if p.onlinePollTimer >= 1.5:
+      p.onlinePollTimer = 0.0
+      discard p.syncOnlineRoom()
 
   if wasAnim and not p.tray.isAnimating():
     p.rebuildButtons()

@@ -45,6 +45,13 @@ type
     seat*: int
     displayName*: string
 
+  OnlineMoveRecord* = object
+    seqNum*: int
+    seat*: int
+    action*: string
+    p1*: int
+    p2*: int
+
   OnlineRoomState* = object
     code*: string
     hostName*: string
@@ -55,6 +62,7 @@ type
     seatToken*: string
     turnSeq*: int
     players*: seq[OnlineSeatInfo]
+    moves*: seq[OnlineMoveRecord]
     lastError*: string
 
 proc todayDateKey*(): string =
@@ -365,6 +373,23 @@ proc pollOnlineRoom*(
         room.players.add(OnlineSeatInfo(
           seat: item.getOrDefault("seat").getInt(0),
           displayName: item.getOrDefault("displayName").getStr(""),
+        ))
+    let marr = j.getOrDefault("moves")
+    if not marr.isNil and marr.kind == JArray:
+      room.moves.setLen(0)
+      for m in marr:
+        let pl = m.getOrDefault("payload")
+        var p1 = 0
+        var p2 = 0
+        if not pl.isNil and pl.kind == JObject:
+          p1 = pl.getOrDefault("p1").getInt(0)
+          p2 = pl.getOrDefault("p2").getInt(0)
+        room.moves.add(OnlineMoveRecord(
+          seqNum: m.getOrDefault("seq").getInt(0),
+          seat: m.getOrDefault("seat").getInt(0),
+          action: m.getOrDefault("action").getStr(""),
+          p1: p1,
+          p2: p2,
         ))
     true
   except CatchableError:

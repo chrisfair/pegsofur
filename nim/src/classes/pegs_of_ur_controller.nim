@@ -31,6 +31,7 @@ import gdext/classes/[
   gdaudiostream,
   gdaudiostreamplayer,
   gdinputevent,
+  gdinputeventkey,
   gdinputeventmousebutton,
   gdinputeventmousemotion,
   gdthemedb,
@@ -456,6 +457,17 @@ method process*(self: PegsOfUrController; delta: float64) {.gdsync.} =
 method input*(self: PegsOfUrController; event: gdref InputEvent) {.gdsync.} =
   if self.presenter.isNil or event[].isNil or Engine.singleton.isEditorHint():
     return
+  let evKey = event[] as InputEventKey
+  if not evKey.isNil and evKey.isPressed() and not evKey.isEcho():
+    let kc = evKey.getKeycode()
+    if kc == keyBackspace:
+      discard self.presenter.onKeyBackspace()
+      return
+    let uni = evKey.getUnicode()
+    if uni >= 32 and uni <= 126:
+      discard self.presenter.onKeyChar(char(uni))
+      return
+
   let mm = event[] as InputEventMouseMotion
   if not mm.isNil:
     let pos = mm.getPosition()
@@ -805,16 +817,20 @@ proc drawModal(self: PegsOfUrController; font: gdref Font) =
       if rem < 0: "Unlimited online games active (Supporter / Microsoft Store)"
       else: fmt"Free online allowance: {rem} of {FreeDailyOnlineLimit} games remaining today (offline/AI is always unlimited)"
     self.drawText(font, mr.x + 24.0, mr.y + 70.0, quotaStr, 13, color(0.90, 0.82, 0.66, 1.0), mr.w - 48.0, horizontalAlignmentCenter)
+    let codeBox = uiRect(mr.x + 28.0, mr.y + 150.0, 250.0, 34.0)
+    self.drawWoodCard(codeBox, color(0.12, 0.07, 0.03, 0.96), color(0.84, 0.66, 0.34, 0.92))
+    let codeText = if p.joinCodeInput.len > 0: fmt"Join Code: {p.joinCodeInput}" else: "Type 6-char room code..."
+    self.drawText(font, codeBox.x + 12.0, codeBox.y + 22.0, codeText, 13, color(0.98, 0.92, 0.78, 1.0))
     if p.onlineStatusMsg.len > 0:
-      self.drawText(font, mr.x + 28.0, mr.y + 178.0, p.onlineStatusMsg, 13, color(0.68, 0.94, 0.72, 1.0))
+      self.drawText(font, mr.x + 28.0, mr.y + 212.0, p.onlineStatusMsg, 13, color(0.68, 0.94, 0.72, 1.0))
     if p.onlineRoom.code.len == 6:
-      self.drawText(font, mr.x + 28.0, mr.y + 216.0, fmt"Active Room Code: {p.onlineRoom.code}   •   Status: {p.onlineRoom.status}   •   Turn #{p.onlineRoom.turnSeq}", 15, color(1.0, 0.90, 0.50, 1.0))
-      var py = mr.y + 252.0
+      self.drawText(font, mr.x + 28.0, mr.y + 244.0, fmt"Active Room Code: {p.onlineRoom.code}   •   Status: {p.onlineRoom.status}   •   Turn #{p.onlineRoom.turnSeq}", 15, color(1.0, 0.90, 0.50, 1.0))
+      var py = mr.y + 278.0
       for pl in p.onlineRoom.players:
         self.drawText(font, mr.x + 36.0, py, fmt"Seat {pl.seat + 1}: {pl.displayName}", 13, color(0.94, 0.88, 0.76, 1.0))
         py += 26.0
     else:
-      self.drawText(font, mr.x + 28.0, mr.y + 216.0, "Create a 2P or 4P room above to receive a 6-character code to share with friends.", 13, color(0.86, 0.78, 0.64, 1.0))
+      self.drawText(font, mr.x + 28.0, mr.y + 244.0, "Create a room above OR type a friend's 6-character code and click Join Room.", 13, color(0.86, 0.78, 0.64, 1.0))
 
   of mkSupport:
     self.drawText(font, mr.x + 20.0, mr.y + 38.0, "SUPPORT PEGS OF UR DEVELOPMENT", 19, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
