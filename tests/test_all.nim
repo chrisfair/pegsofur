@@ -346,31 +346,36 @@ suite "Core Pegs of Ur Rules Engine":
     check sb.bonusVp == 12
     check sb.totalVp == 39
 
-    # Exercise all 6 milestones: Seven Cities (+3), Unscathed (+3), Master Trader (+2*2=4),
-    # Master Builder (+3), First to 4 Adv (+2), First to 8 Adv (+5) => 20 milestone VP.
+    # Exercise all 8 milestones: Seven Cities (+3), Unscathed (+3), Master Trader (+2*2=4),
+    # Master Builder (+3), First to 3 (+2), 5 (+3), 8 (+4), 10 (+5) => 27 milestone VP.
     g.players[0].settlements = MaxSettlements
     g.players[0].workProgress[2] = GreatWorks[2].builders
     g.players[0].wares[wtTimber] = wareMaxQty(wtTimber)
     g.players[0].wares[wtIngots] = wareMaxQty(wtIngots)
-    g.firstTo4AdvOwner = 0
+    g.firstTo3AdvOwner = 0
+    g.firstTo5AdvOwner = 0
     g.firstTo8AdvOwner = 0
+    g.firstTo10AdvOwner = 0
     let sbAll = g.computeScoreBreakdown(0)
-    check sbAll.milestonesVp == SevenCitiesVp + UnscathedRealmVp + 2 * MasterTraderPerTrackVp + MasterBuilderVp + FirstTo4AdvVp + FirstTo8AdvVp
+    check sbAll.milestonesVp == SevenCitiesVp + UnscathedRealmVp + 2 * MasterTraderPerTrackVp + MasterBuilderVp +
+      FirstTo3AdvVp + FirstTo5AdvVp + FirstTo8AdvVp + FirstTo10AdvVp
 
     # Losing Unscathed when taking a calamity drops milestone VP by 3.
     g.players[0].calamities = 1
     check g.computeScoreBreakdown(0).milestonesVp == sbAll.milestonesVp - UnscathedRealmVp
 
-    # Verify live first-to-4 and first-to-8 advancement triggers via buyAdvancement.
+    # Verify live first-to-3/5/8/10 advancement triggers via buyAdvancement.
     let gAdv = make4pGame()
-    for i in 0 ..< 8:
+    for i in 0 ..< 10:
       gAdv.activePlayerIdx = 0
       gAdv.phase = phBuy
       gAdv.boughtAdvThisTurn = false
       gAdv.turnSilver = 100
       check gAdv.buyAdvancement(i)
-    check gAdv.firstTo4AdvOwner == 0
+    check gAdv.firstTo3AdvOwner == 0
+    check gAdv.firstTo5AdvOwner == 0
     check gAdv.firstTo8AdvOwner == 0
+    check gAdv.firstTo10AdvOwner == 0
     check gAdv.finalRoundTriggered
 
     # Verify 3D face target Euler angles exist for all 6 faces.
@@ -939,3 +944,93 @@ suite "Pegs of Ur Online, Quota, Standings & Support":
     check g.playerTotalWares(0) == 1
     # River Sanctuary (+1G) + Terraced Groves (+1G) + 3*3G = +11G -> 3+11-3 fed = 11 Grain
     check g.players[0].grain == 11
+
+  test "Atonement, Omens of Peace, Exorcism, and Golden Age advancements":
+    var g = newPegsOfUrGame(seed = 8080)
+    g.startGame([
+      SeatConfig(name: "Ur", seatType: stHuman),
+      SeatConfig(name: "Byblos", seatType: stAiNormal),
+      SeatConfig(name: "Closed3", seatType: stClosed),
+      SeatConfig(name: "Closed4", seatType: stClosed),
+    ])
+
+    # 1. Exorcism: spend 5 wares during phRoll to purge up to 2 Omen dice + 1 extra die
+    g.players[0].advancements[getAdvancementIndex("exorcism")] = true
+    g.players[0].wares = [3, 2, 1, 0, 0] # 6 wares total
+    g.diceFaces = @[dfOmenWares2, dfOmenWares2, dfGrain3, dfBuilders3]
+    g.diceSelectedForReroll = @[false, false, false, false]
+    g.choiceIsBuilders = @[true, true, true, true]
+    check g.canUseExorcism()
+    check g.useExorcism()
+    check g.playerTotalWares(0) == 1
+    check g.diceFaces.len == 1 # 4 - (2 Omens + 1 extra) = 1
+    check not g.canUseExorcism() # once per turn
+
+    # 2. Omens of Peace: gathering with 0 Omens erases 1 Calamity automatically
+    g.players[0].advancements[getAdvancementIndex("omens_of_peace")] = true
+    g.players[0].calamities = 2
+    g.players[0].grain = 3
+    g.diceFaces = @[dfGrain3, dfSilver7, dfBuilders3]
+    g.finishRolling()
+    check g.players[0].calamities == 1
+
+    # 3. Atonement: pay 3 Silver + 3 Grain once/turn during Build/Buy to erase 1 Calamity
+    g.players[0].advancements[getAdvancementIndex("atonement")] = true
+    g.turnSilver = 7
+    g.players[0].grain = 5
+    check g.phase == phBuild
+    check g.canUseAtonement()
+    check g.useAtonement()
+    check g.players[0].calamities == 0
+    check g.turnSilver == 4
+    check g.players[0].grain == 2
+    check not g.canUseAtonement()
+
+    # 4. Golden Age: costs 280s (> full board 265s), gives +15 VP, and ends game IMMEDIATELY
+    var fullBoardSilver = 0
+    for wt in WareType:
+      g.players[0].wares[wt] = wareMaxQty(wt)
+      fullBoardSilver += wareSilverValue(wt, wareMaxQty(wt))
+    check fullBoardSilver == 265
+    let gaIdx = getAdvancementIndex("golden_age")
+    check Advancements[gaIdx].cost == 280
+    check Advancements[gaIdx].vp == 15
+    g.phase = phBuy
+    g.boughtAdvThisTurn = false
+    g.turnSilver = 14 # 265 + 14 = 279 < 280 -> cannot afford
+    check not g.findOptimalPayment(0, gaIdx).valid
+    g.turnSilver = 15 # 265 + 15 = 280 -> exact
+    check g.findOptimalPayment(0, gaIdx).valid
+    check g.buyAdvancement(gaIdx)
+    check g.phase == phGameOver
+    check g.gameFinishedTriggered
+    check g.finalRoundTriggered
+
+    # 5. Exercise presenter buttons baExorcism and baAtonement
+    var pr = newPegsOfUrPresenter(1680.0, 960.0, seed = 9090, showSetupModal = false)
+    for _ in 0 ..< 140:
+      if not pr.tray.isAnimating(): break
+      pr.tick(0.05)
+    pr.game.players[0].advancements[getAdvancementIndex("exorcism")] = true
+    pr.game.players[0].wares = [5, 0, 0, 0, 0]
+    pr.game.diceFaces = @[dfOmenWares2, dfGrain3, dfBuilders3]
+    pr.syncFromGame()
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baExorcism:
+        check pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.game.exorcismUsed
+
+    pr.game.phase = phBuild
+    pr.game.players[0].advancements[getAdvancementIndex("atonement")] = true
+    pr.game.players[0].calamities = 2
+    pr.game.turnSilver = 5
+    pr.game.players[0].grain = 4
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baAtonement:
+        check pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.game.atonementUsed
+    check pr.game.players[0].calamities == 1

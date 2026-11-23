@@ -37,6 +37,15 @@ proc stepRoll(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
           discard g.rerollSingleWithDivination(i)
           return
 
+  if g.canUseExorcism() and g.rollsUsed >= g.maxRolls:
+    let badOmen =
+      (omens == 2 and not hasCanals) or
+      (omens == 3 and g.isSolo() and not g.playerHasAdv(pIdx, "herbalism")) or
+      (omens == 4 and not hasRamparts) or
+      (omens >= 5 and not hasPriest)
+    if badOmen and g.useExorcism():
+      return
+
   if g.rollsUsed < g.maxRolls:
     var wantReroll = false
     var grainRunning = p.grain
@@ -103,6 +112,9 @@ proc stepAssignChoices(g: PegsOfUrGame; pIdx: int) =
   g.confirmChoices()
 
 proc stepBuild(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
+  if g.canUseAtonement():
+    discard g.useAtonement()
+
   if g.canConvertAlabasterWithCranes():
     let alabQty = g.players[pIdx].wares[wtAlabaster]
     let alabVal = wareSilverValue(wtAlabaster, alabQty)
@@ -190,10 +202,14 @@ proc stepBuy(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
     let overpay = float(plan.totalPaid - plan.cost)
     var utility = float(aDef.vp) * 2.2 - overpay * 0.22
     let nextAdvCnt = g.playerAdvCount(pIdx) + 1
-    if g.firstTo4AdvOwner == -1 and nextAdvCnt == FirstTo4AdvCount:
-      utility += float(FirstTo4AdvVp) * 2.2
+    if g.firstTo3AdvOwner == -1 and nextAdvCnt == FirstTo3AdvCount:
+      utility += float(FirstTo3AdvVp) * 2.2
+    if g.firstTo5AdvOwner == -1 and nextAdvCnt == FirstTo5AdvCount:
+      utility += float(FirstTo5AdvVp) * 2.2
     if g.firstTo8AdvOwner == -1 and nextAdvCnt == FirstTo8AdvCount:
       utility += float(FirstTo8AdvVp) * 2.2
+    if g.firstTo10AdvOwner == -1 and nextAdvCnt == FirstTo10AdvCount:
+      utility += float(FirstTo10AdvVp) * 2.2
 
     case aDef.id
     of "divination", "minting": utility += 5.5 * earlyFactor
@@ -204,6 +220,12 @@ proc stepBuy(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
     of "canals": utility += 2.2 * earlyFactor
     of "herbalism": utility += (if g.isSolo(): 4.2 else: 3.8) * earlyFactor
     of "priesthood": utility += 4.0
+    of "atonement":
+      utility += float(g.players[pIdx].calamities) * 2.5 + 2.5 * earlyFactor
+    of "omens_of_peace":
+      utility += float(g.players[pIdx].calamities) * 2.8 + 4.5 * earlyFactor
+    of "exorcism":
+      utility += 4.5 * earlyFactor
     of "silos":
       if g.playerHasAdv(pIdx, "plowshares"):
         utility += 4.5 * earlyFactor
@@ -213,6 +235,8 @@ proc stepBuy(g: PegsOfUrGame; pIdx: int; diff: SeatType) =
       utility += float(g.playerCompletedWorkCount(pIdx)) * 4.4 + 4.0
     of "hegemony":
       utility += float(g.players[pIdx].settlements) * 2.2 + 4.0
+    of "golden_age":
+      utility += 30.0
     else: discard
 
     if diff == stAiEasy:

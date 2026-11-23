@@ -96,17 +96,21 @@ const
   MaxSettlements* = 7
   DefaultWaresLimit* = 6
   SoloMaxRounds* = 14
-  AdvEndTrigger* = 8
+  AdvEndTrigger* = 10
 
   SevenCitiesVp* = 3
   UnscathedRealmVp* = 3
   MasterTraderPerTrackVp* = 2
   MasterBuilderWorkCount* = 3
   MasterBuilderVp* = 3
-  FirstTo4AdvCount* = 4
-  FirstTo4AdvVp* = 2
+  FirstTo3AdvCount* = 3
+  FirstTo3AdvVp* = 2
+  FirstTo5AdvCount* = 5
+  FirstTo5AdvVp* = 3
   FirstTo8AdvCount* = 8
-  FirstTo8AdvVp* = 5
+  FirstTo8AdvVp* = 4
+  FirstTo10AdvCount* = 10
+  FirstTo10AdvVp* = 5
 
   SettlementCosts*: array[4, int] = [3, 4, 5, 6]
 
@@ -143,7 +147,7 @@ const
     GreatWorkDef(id: "sun_ziggurat", name: "Sun Ziggurat", builders: 15, vpFirst: 12, vpLater: 8, skip2p: true, skip3p: false, note: "3-4P/Solo · +1 Ware & +3 Silver/turn"),
   ]
 
-  Advancements*: array[13, AdvancementDef] = [
+  Advancements*: array[17, AdvancementDef] = [
     AdvancementDef(id: "divination", name: "Divination", cost: 10, vp: 2, effect: "Reroll 1 die (even a locked Omen) once per turn"),
     AdvancementDef(id: "canals", name: "Canals", cost: 10, vp: 2, effect: "Blight (2 Omens) has no effect"),
     AdvancementDef(id: "plowshares", name: "Plowshares", cost: 15, vp: 3, effect: "+1 Grain with each Grain die"),
@@ -152,11 +156,15 @@ const
     AdvancementDef(id: "minting", name: "Minting", cost: 20, vp: 4, effect: "Silver dice yield 12 Silver instead of 7"),
     AdvancementDef(id: "merchant_fleets", name: "Merchant Fleets", cost: 20, vp: 4, effect: "No 6-Ware storage cap at end of turn"),
     AdvancementDef(id: "priesthood", name: "Priesthood", cost: 25, vp: 7, effect: "Uprising (5+ Omens) strikes rivals instead"),
+    AdvancementDef(id: "atonement", name: "Atonement", cost: 25, vp: 4, effect: "Pay 3 Silver + 3 Grain once/turn to erase 1 Calamity"),
     AdvancementDef(id: "silos", name: "Royal Silos", cost: 30, vp: 6, effect: "Trade Grain for 6 Silver each when unlocking"),
     AdvancementDef(id: "scaffolding", name: "Scaffolding", cost: 30, vp: 6, effect: "+1 Builder with each Builder die"),
+    AdvancementDef(id: "omens_of_peace", name: "Omens of Peace", cost: 35, vp: 6, effect: "Erase 1 Calamity whenever you gather with 0 Omens"),
     AdvancementDef(id: "cranes", name: "Timber Cranes", cost: 40, vp: 6, effect: "Trade Alabaster for 3 Builders each when building"),
+    AdvancementDef(id: "exorcism", name: "Exorcism", cost: 45, vp: 7, effect: "Spend 5 Wares during Cast to purge up to 2 Omen dice + 1 extra die"),
     AdvancementDef(id: "urban_planning", name: "Urban Planning", cost: 60, vp: 8, effect: "+2 bonus Renown per completed Great Work"),
     AdvancementDef(id: "hegemony", name: "Hegemony", cost: 70, vp: 10, effect: "+1 bonus Renown per Settlement"),
+    AdvancementDef(id: "golden_age", name: "Golden Age", cost: 280, vp: 15, effect: "Costs > full board + Silver; ends the era IMMEDIATELY (+15 Renown)"),
   ]
 
 proc rgba*(r, g, b: float32; a: float32 = 1.0'f32): Rgba {.inline.} =

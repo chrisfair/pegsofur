@@ -15,7 +15,7 @@ type
     wares*: array[WareType, int]
     workProgress*: array[7, int]
     workFirst*: array[7, bool]
-    advancements*: array[13, bool]
+    advancements*: array[17, bool]
     calamities*: int
 
   ScoreBreakdown* = object
@@ -63,8 +63,10 @@ type
     finalRoundTriggered*: bool
     finalTriggerReason*: string
     workFirstOwner*: array[7, int]
-    firstTo4AdvOwner*: int
+    firstTo3AdvOwner*: int
+    firstTo5AdvOwner*: int
     firstTo8AdvOwner*: int
+    firstTo10AdvOwner*: int
 
     diceFaces*: seq[DieFace]
     diceSelectedForReroll*: seq[bool]
@@ -72,6 +74,8 @@ type
     rollsUsed*: int
     maxRolls*: int
     divinationUsed*: bool
+    exorcismUsed*: bool
+    atonementUsed*: bool
     turnBuilders*: int
     turnSilver*: int
     boughtAdvThisTurn*: bool
@@ -95,8 +99,10 @@ proc newPegsOfUrGame*(seed: int64 = -1; tpmPath: string = DefaultTpmDevice): Peg
     phase: phSetup,
     roundNumber: 1,
     maxRolls: 3,
-    firstTo4AdvOwner: -1,
+    firstTo3AdvOwner: -1,
+    firstTo5AdvOwner: -1,
     firstTo8AdvOwner: -1,
+    firstTo10AdvOwner: -1,
   )
   for i in 0 ..< GreatWorks.len:
     result.workFirstOwner[i] = -1
@@ -159,10 +165,14 @@ proc computeScoreBreakdown*(g: PegsOfUrGame; pIdx: int): ScoreBreakdown =
   mVp += g.playerMaxedWareTrackCount(pIdx) * MasterTraderPerTrackVp
   if g.playerCompletedWorkCount(pIdx) >= MasterBuilderWorkCount:
     mVp += MasterBuilderVp
-  if g.firstTo4AdvOwner == pIdx:
-    mVp += FirstTo4AdvVp
+  if g.firstTo3AdvOwner == pIdx:
+    mVp += FirstTo3AdvVp
+  if g.firstTo5AdvOwner == pIdx:
+    mVp += FirstTo5AdvVp
   if g.firstTo8AdvOwner == pIdx:
     mVp += FirstTo8AdvVp
+  if g.firstTo10AdvOwner == pIdx:
+    mVp += FirstTo10AdvVp
 
   var bonusVp = mVp
   if g.playerHasAdv(pIdx, "urban_planning"):
@@ -218,6 +228,8 @@ proc beginTurn(g: PegsOfUrGame) =
   g.rollsUsed = 1
   g.maxRolls = if g.playerHasWork(g.activePlayerIdx, "standing_stones"): 4 else: 3
   g.divinationUsed = false
+  g.exorcismUsed = false
+  g.atonementUsed = false
   g.turnBuilders = 0
   g.turnSilver = 0
   g.boughtAdvThisTurn = false
@@ -231,8 +243,10 @@ proc startGame*(g: PegsOfUrGame; configs: openArray[SeatConfig]) =
   g.gameFinishedTriggered = false
   for i in 0 ..< GreatWorks.len:
     g.workFirstOwner[i] = -1
-  g.firstTo4AdvOwner = -1
+  g.firstTo3AdvOwner = -1
+  g.firstTo5AdvOwner = -1
   g.firstTo8AdvOwner = -1
+  g.firstTo10AdvOwner = -1
 
   for cfg in configs:
     if cfg.seatType == stClosed:
@@ -330,6 +344,87 @@ proc rerollSingleWithDivination*(g: PegsOfUrGame; dieIdx: int): bool =
   g.addLog(fmt"{g.players[g.activePlayerIdx].name} used Divination: {oldLbl} -> {newLbl}.")
   true
 
+proc canUseExorcism*(g: PegsOfUrGame): bool =
+  if g.phase != phRoll or g.exorcismUsed or not g.playerHasAdv(g.activePlayerIdx, "exorcism"):
+    return false
+  if g.playerTotalWares(g.activePlayerIdx) < 5 or g.diceFaces.len < 2:
+    return false
+  for f in g.diceFaces:
+    if f == dfOmenWares2:
+      return true
+  false
+
+proc useExorcism*(g: PegsOfUrGame): bool =
+  if not g.canUseExorcism():
+    return false
+  let pIdx = g.activePlayerIdx
+  # Spend 5 Wares, discarding lowest marginal Silver value first.
+  for _ in 0 ..< 5:
+    var bestW = wtTimber
+    var minLoss = 999999
+    var found = false
+    for wt in WareType:
+      let q = g.players[pIdx].wares[wt]
+      if q > 0:
+        let loss = wareSilverValue(wt, q) - wareSilverValue(wt, q - 1)
+        if not found or loss < minLoss:
+          found = true
+          minLoss = loss
+          bestW = wt
+    if found:
+      dec g.players[pIdx].wares[bestW]
+
+  # Purge up to 2 Omen dice + 1 additional die for the rest of this cast.
+  var toRemove: seq[int]
+  for i, f in g.diceFaces:
+    if f == dfOmenWares2 and toRemove.len < 2:
+      toRemove.add(i)
+  let omenPurged = toRemove.len
+  # Pick 1 additional die to sacrifice (preferring a non-Omen die if available).
+  var extraIdx = -1
+  for i, f in g.diceFaces:
+    if i notin toRemove and f != dfOmenWares2:
+      extraIdx = i
+      break
+  if extraIdx == -1:
+    for i in 0 ..< g.diceFaces.len:
+      if i notin toRemove:
+        extraIdx = i
+        break
+  if extraIdx >= 0:
+    toRemove.add(extraIdx)
+
+  toRemove.sort(system.cmp[int], Descending)
+  for idx in toRemove:
+    g.diceFaces.delete(idx)
+    g.diceSelectedForReroll.delete(idx)
+    g.choiceIsBuilders.delete(idx)
+
+  g.exorcismUsed = true
+  g.lastRolledIndices.setLen(0)
+  let word = if omenPurged == 1: "Omen die" else: "Omen dice"
+  g.addLog(fmt"{g.players[pIdx].name} performed Exorcism (-5 Wares): purged {omenPurged} {word} + 1 extra die!")
+  true
+
+proc canUseAtonement*(g: PegsOfUrGame): bool {.inline.} =
+  g.phase in {phBuild, phBuy} and
+    g.playerHasAdv(g.activePlayerIdx, "atonement") and
+    not g.atonementUsed and
+    g.players[g.activePlayerIdx].calamities > 0 and
+    g.turnSilver >= 3 and
+    g.players[g.activePlayerIdx].grain >= 3
+
+proc useAtonement*(g: PegsOfUrGame): bool =
+  if not g.canUseAtonement():
+    return false
+  let pIdx = g.activePlayerIdx
+  g.turnSilver -= 3
+  g.players[pIdx].grain -= 3
+  dec g.players[pIdx].calamities
+  g.atonementUsed = true
+  g.addLog(fmt"{g.players[pIdx].name} performed Atonement (-3 Silver, -3 Grain) and erased 1 Calamity!")
+  true
+
 proc checkEndTriggers(g: PegsOfUrGame) =
   if g.finalRoundTriggered:
     return
@@ -398,7 +493,10 @@ proc canAffordAnyAdvancement*(g: PegsOfUrGame; pIdx: int): bool =
   false
 
 proc enterBuyPhase(g: PegsOfUrGame) =
-  if g.canAffordAnyAdvancement(g.activePlayerIdx):
+  if g.canAffordAnyAdvancement(g.activePlayerIdx) or
+      (g.playerHasAdv(g.activePlayerIdx, "atonement") and not g.atonementUsed and
+       g.players[g.activePlayerIdx].calamities > 0 and g.turnSilver >= 3 and
+       g.players[g.activePlayerIdx].grain >= 3):
     g.phase = phBuy
   else:
     g.enterDiscardOrEndTurn()
@@ -587,6 +685,9 @@ proc resolveHarvestFeedCalamities(g: PegsOfUrGame) =
     g.pendingCalamities.add(CalamityAlert(title: "Starvation!", detail: fmt"{g.players[pIdx].name} could not feed {unfed} settlements (-{unfed} Renown)"))
 
   g.resolveOmenCalamities(omens)
+  if omens == 0 and g.players[pIdx].calamities > 0 and g.playerHasAdv(pIdx, "omens_of_peace"):
+    dec g.players[pIdx].calamities
+    g.addLog(fmt"{g.players[pIdx].name}'s Omens of Peace erased 1 Calamity (0 Omens gathered)!")
   g.enterBuildPhase()
 
 proc finishRolling*(g: PegsOfUrGame) =
@@ -837,12 +938,26 @@ proc buyAdvancement*(g: PegsOfUrGame; advIdx: int; customMask: openArray[bool] =
   let summary = if spentParts.len > 0: spentParts.join(", ") else: "0s"
   g.addLog(fmt"{g.players[pIdx].name} unlocked {advDef.name} ({advDef.cost}s, +{advDef.vp} Renown) using {summary}.")
   let advCnt = g.playerAdvCount(pIdx)
-  if g.firstTo4AdvOwner == -1 and advCnt >= FirstTo4AdvCount:
-    g.firstTo4AdvOwner = pIdx
-    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo4AdvCount} Advancements (+{FirstTo4AdvVp} Renown)!")
+  if g.firstTo3AdvOwner == -1 and advCnt >= FirstTo3AdvCount:
+    g.firstTo3AdvOwner = pIdx
+    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo3AdvCount} Advancements (+{FirstTo3AdvVp} Renown)!")
+  if g.firstTo5AdvOwner == -1 and advCnt >= FirstTo5AdvCount:
+    g.firstTo5AdvOwner = pIdx
+    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo5AdvCount} Advancements (+{FirstTo5AdvVp} Renown)!")
   if g.firstTo8AdvOwner == -1 and advCnt >= FirstTo8AdvCount:
     g.firstTo8AdvOwner = pIdx
     g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo8AdvCount} Advancements (+{FirstTo8AdvVp} Renown)!")
+  if g.firstTo10AdvOwner == -1 and advCnt >= FirstTo10AdvCount:
+    g.firstTo10AdvOwner = pIdx
+    g.addLog(fmt"{g.players[pIdx].name} was FIRST to {FirstTo10AdvCount} Advancements (+{FirstTo10AdvVp} Renown)!")
+  if advDef.id == "golden_age":
+    g.finalRoundTriggered = true
+    g.finalTriggerReason = fmt"{g.players[pIdx].name} proclaimed the Golden Age!"
+    g.phase = phGameOver
+    g.gameFinishedTriggered = true
+    let st = g.getStandings()
+    g.addLog(fmt"=== GOLDEN AGE! {g.players[pIdx].name} ended the era immediately! Victor: {st[0].name} ({st[0].totalVp} Renown) ===")
+    return true
   g.checkEndTriggers()
   g.enterDiscardOrEndTurn()
   true

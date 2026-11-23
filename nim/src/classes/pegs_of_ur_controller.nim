@@ -750,7 +750,7 @@ proc drawModal(self: PegsOfUrController; font: gdref Font) =
       "4. CONSTRUCT: Spend Builders on Settlements (costs 3,4,5,6) and Great Works. First finisher claims top Renown.",
       "5. UNLOCK 1 ADVANCEMENT: Spend turn Silver + Ware tracks (whole-track rule: all pegs in a spent row reset to 0).",
       "6. MILESTONE BONUSES: Seven Cities (+3 VP at 7/7 dice), Unscathed (+3 VP for 0 Calamities), Master Trader",
-      "   (+2 VP per maxed Ware track), Master Builder (+3 VP for 3+ Great Works), 1st to 4 Adv (+2 VP), 1st to 8 (+5 VP).",
+      "   (+2 VP per maxed Ware track), Master Builder (+3 VP for 3+ Great Works), 1st to 3 (+2), 5 (+3), 8 (+4), 10 Adv (+5).",
       "7. STORAGE & END OF ERA: Keep at most 6 Wares unless holding Merchant Fleets. Equal-turns final round triggers",
       fmt"   when any realm unlocks {AdvEndTrigger} Advancements or every active Great Work stands complete (or Round {SoloMaxRounds} in Solo).",
       "   Tiebreaker: highest Silver value of remaining Wares on your Pegboard.",
@@ -994,7 +994,7 @@ method draw*(self: PegsOfUrController) {.gdsync.} =
 
   let aa = p.advancementsAreaRect()
   self.drawLine(vector2(rCol.x + 14.0, aa.y - 26.0), vector2(rCol.x + rCol.w - 14.0, aa.y - 26.0), color(0.42, 0.26, 0.12, 0.55), 1.5)
-  self.drawText(font, rCol.x + 14.0, aa.y - 8.0, fmt"CIVIC ADVANCEMENTS (Scroll • 1/Turn • 1st to 4:+{FirstTo4AdvVp}VP, 8:+{FirstTo8AdvVp}VP & End)", 12, color(0.20, 0.10, 0.03, 1.0))
+  self.drawText(font, rCol.x + 14.0, aa.y - 8.0, fmt"CIVIC ADVANCEMENTS (Scroll • 1/Turn • 1st: 3:+{FirstTo3AdvVp}, 5:+{FirstTo5AdvVp}, 8:+{FirstTo8AdvVp}, 10:+{FirstTo10AdvVp} & End)", 11, color(0.20, 0.10, 0.03, 1.0))
 
   let rowStride = 44.0
   for aIdx in 0 ..< Advancements.len:

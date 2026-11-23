@@ -22,6 +22,7 @@ type
     baRollSelected
     baSelectAllRerollable
     baToggleDivination
+    baExorcism
     baKeepDiceAndHarvest
     baFlipChoiceDie
     baConfirmChoices
@@ -30,6 +31,7 @@ type
     baBuildWorkOne
     baBuildWorkBulk
     baConvertCranes
+    baAtonement
     baResetBuild
     baFinishBuilding
     baSelectAdvCustomPay
@@ -441,11 +443,15 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
         bx += 160.0
         p.addBtn(uiRect(bx, btnY, 162.0, 34.0), "Select All Rerollable", baSelectAllRerollable, warmBg, brass, enabled = not anim)
         bx += 170.0
+      p.addBtn(uiRect(bx, btnY, 174.0, 34.0), "Keep Dice & Gather ->", baKeepDiceAndHarvest, greenBg, goldHi, enabled = not anim)
+
+      var rx2 = ac.x + 14.0
       if p.game.canUseDivination():
         let dTxt = if p.divinationArmed: "Cancel Divination" else: "Divination (1 Die)"
-        p.addBtn(uiRect(bx, btnY, 156.0, 34.0), dTxt, baToggleDivination, if p.divinationArmed: greenBg else: warmBg, goldHi, enabled = not anim, active = p.divinationArmed)
-        bx += 164.0
-      p.addBtn(uiRect(bx, btnY, 174.0, 34.0), "Keep Dice & Gather ->", baKeepDiceAndHarvest, greenBg, goldHi, enabled = not anim)
+        p.addBtn(uiRect(rx2, btnY - 36.0, 156.0, 28.0), dTxt, baToggleDivination, if p.divinationArmed: greenBg else: warmBg, goldHi, enabled = not anim, active = p.divinationArmed)
+        rx2 += 164.0
+      if p.game.canUseExorcism():
+        p.addBtn(uiRect(rx2, btnY - 36.0, 224.0, 28.0), "Exorcism (-5W: -2 Omens, -1 Die)", baExorcism, redBg, goldHi, enabled = not anim)
 
     of phAssignChoices:
       var bx = ac.x + 14.0
@@ -458,6 +464,8 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
 
     of phBuild:
       var bx = ac.x + 14.0
+      if p.game.canUseAtonement():
+        p.addBtn(uiRect(ac.x + 14.0, btnY - 36.0, 244.0, 28.0), "Atonement (3s + 3G -> -1 Calamity)", baAtonement, accentBg, goldHi)
       if p.game.canConvertAlabasterWithCranes():
         let alQ = p.game.players[p.game.activePlayerIdx].wares[wtAlabaster]
         p.addBtn(uiRect(bx, btnY, 224.0, 34.0), fmt"Cranes: 1 Alabaster ({alQ}) -> +3B", baConvertCranes, accentBg, brass)
@@ -508,7 +516,11 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
         p.addBtn(uiRect(ac.x + 254.0, btnY, 122.0, 34.0), "Cancel", baCancelCustomBuy, warmBg, brass)
         p.addBtn(uiRect(ac.x + 384.0, btnY, 174.0, 34.0), "Skip Unlocking ->", baSkipBuying, warmBg, brass)
       else:
-        p.addBtn(uiRect(ac.x + 14.0, btnY, 224.0, 34.0), "Skip Advancement & End Turn ->", baSkipBuying, warmBg, brass)
+        var bx = ac.x + 14.0
+        if p.game.canUseAtonement():
+          p.addBtn(uiRect(bx, btnY, 244.0, 34.0), "Atonement (3s + 3G -> -1 Calamity)", baAtonement, accentBg, goldHi)
+          bx += 252.0
+        p.addBtn(uiRect(bx, btnY, 224.0, 34.0), "Skip Advancement & End Turn ->", baSkipBuying, warmBg, brass)
 
     of phDiscard:
       let ap = p.game.players[p.game.activePlayerIdx]
@@ -609,9 +621,9 @@ proc selectAdvForCustomPay*(p: PegsOfUrPresenter; advIdx: int) =
 
 proc isGameplayAction(a: ButtonAction): bool =
   a in {
-    baRollSelected, baSelectAllRerollable, baToggleDivination, baKeepDiceAndHarvest,
+    baRollSelected, baSelectAllRerollable, baToggleDivination, baExorcism, baKeepDiceAndHarvest,
     baFlipChoiceDie, baConfirmChoices, baBuildSettlementOne, baBuildSettlementFinish,
-    baBuildWorkOne, baBuildWorkBulk, baConvertCranes, baResetBuild, baFinishBuilding,
+    baBuildWorkOne, baBuildWorkBulk, baConvertCranes, baAtonement, baResetBuild, baFinishBuilding,
     baAutoBuyAdv, baConfirmCustomBuy, baSkipBuying, baDiscardWare,
   }
 
@@ -841,6 +853,9 @@ proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
   of baToggleDivination:
     p.divinationArmed = not p.divinationArmed
     p.pushAudio(akUiTap)
+  of baExorcism:
+    if p.game.useExorcism():
+      p.pushAudio(akOmenThud)
   of baKeepDiceAndHarvest:
     p.pushAudio(akPegTap)
     p.game.finishRolling()
@@ -865,6 +880,9 @@ proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
   of baConvertCranes:
     if p.game.convertAlabasterToBuilders(1):
       p.pushAudio(akBuild)
+  of baAtonement:
+    if p.game.useAtonement():
+      p.pushAudio(akFanfare, 0.65, 1.15)
   of baResetBuild:
     if p.game.resetBuildStep():
       p.pushAudio(akUiTap)

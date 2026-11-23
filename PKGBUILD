@@ -1,6 +1,6 @@
 # Maintainer: Christopher Patrick Fair <christopherpatrickfair@gmail.com>
 pkgname=pegsofur
-pkgver=1.0.1
+pkgver=1.0.2
 pkgrel=1
 _gdext_ver=0.17.1
 pkgdesc="Ancient city-states dice and wooden pegboard strategy game for 1-4 Human/AI players"
