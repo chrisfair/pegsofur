@@ -37,6 +37,9 @@ type
     mkSetup = 1
     mkRules = 2
     mkGameOver = 3
+    mkGlobalStandings = 4
+    mkOnlineLobby = 5
+    mkSupport = 6
 
   AiSpeedKind* = enum
     asNormal = 0

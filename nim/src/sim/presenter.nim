@@ -1,7 +1,7 @@
 ## Pure-Nim tabletop UI layout, button synthesis, input handling, and presenter state.
 
 import std/[strformat]
-import data, game, ai, physics
+import data, game, ai, physics, online
 
 type
   ButtonAction* = enum
@@ -42,6 +42,18 @@ type
     baSkipBuying
     baDiscardWare
     baOpenStandings
+    baOpenGlobalStandings
+    baRefreshStandings
+    baSubmitCurrentStanding
+    baToggleStandingsMode
+    baOpenOnlineLobby
+    baCreateOnlineRoom
+    baPollOnlineRoom
+    baOpenSupport
+    baOpenStripeSupport1
+    baOpenStripeSupport5
+    baDismissSupport
+    baMarkSupported
 
   UiButton* = object
     rect*: UiRect
@@ -87,6 +99,14 @@ type
 
     lastSyncedRollSeq*: int
     lastSyncedPhase*: Phase
+
+    profile*: PegsProfile
+    globalStandings*: seq[StandingEntry]
+    standingsMode*: string
+    onlineRoom*: OnlineRoomState
+    onlineStatusMsg*: string
+    pendingExternalUrl*: string
+    httpTransport*: HttpTransport
 
 const
   RealmNamePool: array[8, string] = [
@@ -162,8 +182,15 @@ proc advancementsAreaRect*(p: PegsOfUrPresenter): UiRect =
   uiRect(rc.x + 12.0, topY, rc.w - 24.0, max(160.0, rc.y + rc.h - topY - 12.0))
 
 proc modalCardRect*(p: PegsOfUrPresenter): UiRect =
-  let w = if p.modal == mkRules: 790.0 elif p.modal == mkGameOver: 750.0 else: 650.0
-  let h = if p.modal == mkRules: 610.0 elif p.modal == mkGameOver: 430.0 else: 450.0
+  let w =
+    if p.modal == mkRules: 790.0
+    elif p.modal in {mkGameOver, mkGlobalStandings, mkOnlineLobby}: 760.0
+    else: 650.0
+  let h =
+    if p.modal == mkRules: 610.0
+    elif p.modal in {mkGlobalStandings, mkOnlineLobby}: 520.0
+    elif p.modal == mkGameOver: 450.0
+    else: 450.0
   uiRect((p.screenW - w) * 0.5, (p.screenH - h) * 0.5, w, h)
 
 proc isDieClickable*(p: PegsOfUrPresenter; idx: int): bool =
@@ -296,8 +323,39 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
 
     of mkGameOver:
       let by = mr.y + mr.h - 54.0
-      p.addBtn(uiRect(mr.x + mr.w * 0.5 - 220.0, by, 200.0, 36.0), "Inspect Final Board", baCloseModal, warmBg, brass)
-      p.addBtn(uiRect(mr.x + mr.w * 0.5 + 20.0, by, 200.0, 36.0), "New Match Setup", baOpenSetup, accentBg, goldHi)
+      p.addBtn(uiRect(mr.x + 28.0, by, 180.0, 36.0), "Inspect Final Board", baCloseModal, warmBg, brass)
+      p.addBtn(uiRect(mr.x + 220.0, by, 210.0, 36.0), "Submit Global Score", baSubmitCurrentStanding, accentBg, goldHi)
+      p.addBtn(uiRect(mr.x + 442.0, by, 160.0, 36.0), "New Match", baOpenSetup, warmBg, brass)
+      if p.profile.shouldShowSupportPrompt():
+        p.addBtn(uiRect(mr.x + 614.0, by, 118.0, 36.0), "Support", baOpenSupport, accentBg, goldHi)
+
+    of mkGlobalStandings:
+      let topY = mr.y + 62.0
+      let modeLbl = if p.standingsMode == "multi": "Mode: Multiplayer" else: "Mode: Solo (10-Rd)"
+      p.addBtn(uiRect(mr.x + 24.0, topY, 175.0, 32.0), modeLbl, baToggleStandingsMode, warmBg, brass)
+      p.addBtn(uiRect(mr.x + 208.0, topY, 120.0, 32.0), "Refresh", baRefreshStandings, warmBg, brass)
+      p.addBtn(uiRect(mr.x + 336.0, topY, 195.0, 32.0), "Submit Current Score", baSubmitCurrentStanding, accentBg, goldHi)
+      if not p.profile.isMicrosoftStore:
+        p.addBtn(uiRect(mr.x + mr.w - 144.0, topY, 120.0, 32.0), "Support", baOpenSupport, warmBg, brass)
+      p.addBtn(uiRect(mr.x + (mr.w - 180.0) * 0.5, mr.y + mr.h - 50.0, 180.0, 36.0), "Close", baCloseModal, accentBg, goldHi)
+
+    of mkOnlineLobby:
+      let rowY = mr.y + 112.0
+      p.addBtn(uiRect(mr.x + 28.0, rowY, 190.0, 36.0), "Create 2P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 2)
+      p.addBtn(uiRect(mr.x + 230.0, rowY, 190.0, 36.0), "Create 4P Room", baCreateOnlineRoom, accentBg, goldHi, intParam = 4)
+      p.addBtn(uiRect(mr.x + 432.0, rowY, 145.0, 36.0), "Refresh Room", baPollOnlineRoom, warmBg, brass, enabled = p.onlineRoom.code.len == 6)
+      if not p.profile.isMicrosoftStore and not p.profile.isUnlimitedOnline():
+        p.addBtn(uiRect(mr.x + 589.0, rowY, 143.0, 36.0), "Unlock Unlimited", baOpenSupport, warmBg, goldHi)
+      p.addBtn(uiRect(mr.x + (mr.w - 180.0) * 0.5, mr.y + mr.h - 50.0, 180.0, 36.0), "Close", baCloseModal, accentBg, goldHi)
+
+    of mkSupport:
+      let rowY = mr.y + 230.0
+      p.addBtn(uiRect(mr.x + 44.0, rowY, 175.0, 38.0), "Support $1 (Stripe)", baOpenStripeSupport1, accentBg, goldHi)
+      p.addBtn(uiRect(mr.x + 235.0, rowY, 175.0, 38.0), "Support $5 (Stripe)", baOpenStripeSupport5, accentBg, goldHi)
+      p.addBtn(uiRect(mr.x + 426.0, rowY, 180.0, 38.0), "I've Supported", baMarkSupported, warmBg, goldHi)
+      let by = mr.y + mr.h - 52.0
+      p.addBtn(uiRect(mr.x + 140.0, by, 180.0, 34.0), "Don't Show Again", baDismissSupport, warmBg, brass)
+      p.addBtn(uiRect(mr.x + 340.0, by, 170.0, 34.0), "Close", baCloseModal, accentBg, goldHi)
 
     of mkNone:
       discard
@@ -305,16 +363,21 @@ proc rebuildButtons*(p: PegsOfUrPresenter) =
 
   let tb = p.topBarRect()
   var rx = tb.x + tb.w - 10.0
-  let audioLbl = if p.audioMuted: "Audio: Muted" else: "Audio: On"
-  for item in [
-    ("New Match", 98.0, baOpenSetup, accentBg),
-    ("Rules", 68.0, baOpenRules, warmBg),
-    (audioLbl, 104.0, baToggleAudio, warmBg),
-    (fmt"AI: {aiSpeedLabel(p.aiSpeed)}", 98.0, baCycleAiSpeed, warmBg),
-  ]:
+  let audioLbl = if p.audioMuted: "Audio: Off" else: "Audio: On"
+  var topBtns = @[
+    ("New Match", 92.0, baOpenSetup, accentBg),
+    ("Online", 68.0, baOpenOnlineLobby, warmBg),
+    ("Standings", 84.0, baOpenGlobalStandings, warmBg),
+    ("Rules", 58.0, baOpenRules, warmBg),
+    (audioLbl, 84.0, baToggleAudio, warmBg),
+    (fmt"AI: {aiSpeedLabel(p.aiSpeed)}", 88.0, baCycleAiSpeed, warmBg),
+  ]
+  if not p.profile.isMicrosoftStore:
+    topBtns.insert(("Support", 70.0, baOpenSupport, warmBg), 3)
+  for item in topBtns:
     rx -= item[1]
     p.addBtn(uiRect(rx, tb.y + 10.0, item[1], 34.0), item[0], item[2], item[3], brass)
-    rx -= 8.0
+    rx -= 6.0
 
   let nPlayers = p.game.players.len
   if nPlayers > 0:
@@ -568,6 +631,85 @@ proc executeButtonAction(p: PegsOfUrPresenter; btn: UiButton): bool =
     p.pushAudio(akUiTap)
   of baOpenStandings:
     p.modal = mkGameOver
+    p.pushAudio(akUiTap)
+  of baOpenGlobalStandings:
+    if p.standingsMode.len == 0:
+      p.standingsMode = if p.game.isSolo(): "solo" else: "multi"
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    p.globalStandings = fetchGlobalStandings(p.standingsMode, 10, DefaultApiBase, tr)
+    p.modal = mkGlobalStandings
+    p.pushAudio(akUiTap)
+  of baToggleStandingsMode:
+    p.standingsMode = if p.standingsMode == "multi": "solo" else: "multi"
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    p.globalStandings = fetchGlobalStandings(p.standingsMode, 10, DefaultApiBase, tr)
+    p.pushAudio(akUiTap)
+  of baRefreshStandings:
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    let mode = if p.standingsMode.len > 0: p.standingsMode else: "solo"
+    p.globalStandings = fetchGlobalStandings(mode, 10, DefaultApiBase, tr)
+    p.onlineStatusMsg = fmt"Refreshed {mode} standings ({p.globalStandings.len} entries)."
+    p.pushAudio(akUiTap)
+  of baSubmitCurrentStanding:
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    let standings = p.game.getStandings()
+    if standings.len > 0:
+      let top = standings[0]
+      let mode = if p.game.isSolo(): "solo" else: "multi"
+      var works = 0
+      for w in 0 ..< p.game.workFirstOwner.len:
+        if p.game.workFirstOwner[w] == 0: inc works
+      var advs = 0
+      for a in 0 ..< p.game.players[0].advancements.len:
+        if p.game.players[0].advancements[a]: inc advs
+      let ok = submitGlobalStanding(p.profile, mode, top.totalVp, max(1, p.game.roundNumber), works, advs, true, DefaultApiBase, tr)
+      p.onlineStatusMsg = if ok: fmt"Submitted {top.totalVp} VP to global {mode} standings!" else: "Could not reach global standings server."
+      p.standingsMode = mode
+      p.globalStandings = fetchGlobalStandings(mode, 10, DefaultApiBase, tr)
+      p.modal = mkGlobalStandings
+    p.pushAudio(akUiTap)
+  of baOpenOnlineLobby:
+    p.modal = mkOnlineLobby
+    p.pushAudio(akUiTap)
+  of baCreateOnlineRoom:
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    let maxP = if btn.intParam >= 2: btn.intParam else: 2
+    p.onlineRoom = createOnlineRoom(p.profile, maxP, DefaultApiBase, tr)
+    if p.onlineRoom.lastError.len > 0:
+      p.onlineStatusMsg = p.onlineRoom.lastError
+    else:
+      p.onlineStatusMsg = fmt"Room {p.onlineRoom.code} created! Share this code with friends."
+      discard saveProfile(p.profile)
+    p.pushAudio(akUiTap)
+  of baPollOnlineRoom:
+    let tr = if p.httpTransport.isNil: defaultHttpTransport else: p.httpTransport
+    if pollOnlineRoom(p.onlineRoom, DefaultApiBase, tr):
+      p.onlineStatusMsg = fmt"Room {p.onlineRoom.code}: {p.onlineRoom.players.len}/{p.onlineRoom.maxPlayers} seated ({p.onlineRoom.status})."
+    else:
+      p.onlineStatusMsg = "Could not refresh room state."
+    p.pushAudio(akUiTap)
+  of baOpenSupport:
+    p.modal = mkSupport
+    p.pushAudio(akUiTap)
+  of baOpenStripeSupport1:
+    p.pendingExternalUrl = buildSupportCheckoutUrl(p.profile.email, 1)
+    p.onlineStatusMsg = "Opened voluntary $1 Stripe support link in browser."
+    p.pushAudio(akUiTap)
+  of baOpenStripeSupport5:
+    p.pendingExternalUrl = buildSupportCheckoutUrl(p.profile.email, 5)
+    p.onlineStatusMsg = "Opened voluntary $5 Stripe support link in browser."
+    p.pushAudio(akUiTap)
+  of baMarkSupported:
+    p.profile.supported = true
+    p.profile.supportTier = "Voluntary Supporter"
+    discard saveProfile(p.profile)
+    p.onlineStatusMsg = "Thank you! Unlimited online games unlocked."
+    p.modal = mkNone
+    p.pushAudio(akUiTap)
+  of baDismissSupport:
+    p.profile.supportPromptDismissed = true
+    discard saveProfile(p.profile)
+    p.modal = mkNone
     p.pushAudio(akUiTap)
   of baCycleSeatType:
     let i = btn.intParam

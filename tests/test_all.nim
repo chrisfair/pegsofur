@@ -617,3 +617,169 @@ suite "AI Simulation, Physics Tray, Pegboard, and UI Presenter":
         discard p.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
         break
     check p.modal == mkGameOver
+
+import sim/online
+import std/[os, json]
+
+suite "Pegs of Ur Online, Quota, Standings & Support":
+  test "profile persistence, email validation, 5/day quota, and support prompt":
+    check isValidEmail("player@example.com")
+    check not isValidEmail("invalid")
+    check not isValidEmail("a@b")
+    check not isValidEmail("bad space@example.com")
+
+    var prof = initDefaultProfile()
+    prof.email = "player@example.com"
+    prof.displayName = "UrHero"
+    check remainingOnlineGamesToday(prof, "2026-11-23") == FreeDailyOnlineLimit
+    check canStartOnlineGame(prof, "2026-11-23")
+
+    for i in 0 ..< FreeDailyOnlineLimit:
+      check recordOnlineGameStarted(prof, "2026-11-23")
+    check not canStartOnlineGame(prof, "2026-11-23")
+    check not recordOnlineGameStarted(prof, "2026-11-23")
+    check remainingOnlineGamesToday(prof, "2026-11-23") == 0
+
+    # New day resets daily quota
+    check canStartOnlineGame(prof, "2026-11-24")
+    check remainingOnlineGamesToday(prof, "2026-11-24") == FreeDailyOnlineLimit
+
+    # Support prompt triggers gently after 3 completed games on Linux/non-Store
+    check not shouldShowSupportPrompt(prof)
+    prof.recordLocalGameCompleted()
+    prof.recordLocalGameCompleted()
+    check not shouldShowSupportPrompt(prof)
+    prof.recordLocalGameCompleted()
+    check shouldShowSupportPrompt(prof)
+
+    # Checkout URLs include client_reference_id
+    check "pegsofur_player%40example.com" in buildSupportCheckoutUrl(prof.email, 5)
+    check "pegsofur_linux" in buildSupportCheckoutUrl("", 1)
+
+    # Supporter or Microsoft Store buyer gets unlimited online games and no support prompt
+    prof.supported = true
+    check isUnlimitedOnline(prof)
+    check remainingOnlineGamesToday(prof, "2026-11-23") == -1
+    check not shouldShowSupportPrompt(prof)
+    check recordOnlineGameStarted(prof, "2026-11-23")
+
+    # Disk round-trip
+    let tmpPath = getTempDir() / "pegsofur_test_profile.json"
+    defer:
+      if fileExists(tmpPath): removeFile(tmpPath)
+    check saveProfile(prof, tmpPath)
+    let loaded = loadProfile(tmpPath)
+    check loaded.email == "player@example.com"
+    check loaded.displayName == "UrHero"
+    check loaded.supported
+
+  test "online API client (standings, rooms, account sync) and presenter modals":
+    let mockTransport: HttpTransport = proc(httpMethod, url, body: string): HttpResponseData =
+      if "/v1/account" in url:
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"supported":true,"tierLabel":"Supporter","date":"2026-11-23","dailyUsed":2}""")
+      if "/v1/standings" in url and httpMethod == "GET":
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"mode":"solo","entries":[{"rank":1,"displayName":"Ur","mode":"solo","score":48,"rounds":10,"worksBuilt":4,"advancements":5,"won":true}]}""")
+      if "/v1/standings" in url and httpMethod == "POST":
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"recorded":true}""")
+      if "/v1/rooms/join" in url:
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"code":"UR4821","seat":1,"seatToken":"tok2","seed":42,"status":"active","dailyUsed":1}""")
+      if "/v1/rooms/move" in url:
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"turnSeq":2}""")
+      if "/v1/rooms" in url and httpMethod == "POST":
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"code":"UR4821","seat":0,"seatToken":"tok1","seed":42,"dailyUsed":1}""")
+      if "/v1/rooms" in url and httpMethod == "GET":
+        return HttpResponseData(statusCode: 200, ok: true, body: """{"ok":true,"code":"UR4821","hostName":"Ur","maxPlayers":2,"status":"active","turnSeq":1,"players":[{"seat":0,"displayName":"Ur"},{"seat":1,"displayName":"Byblos"}]}""")
+      HttpResponseData(statusCode: 404, ok: false, body: """{"error":"not found"}""")
+
+    var prof = initDefaultProfile()
+    prof.email = "supporter@example.com"
+    check syncAccountStatus(prof, DefaultApiBase, mockTransport)
+    check prof.supported
+
+    let entries = fetchGlobalStandings("solo", 10, DefaultApiBase, mockTransport)
+    check entries.len == 1
+    check entries[0].score == 48
+
+    check submitGlobalStanding(prof, "solo", 48, 10, 4, 5, true, DefaultApiBase, mockTransport)
+
+    var room = createOnlineRoom(prof, 2, DefaultApiBase, mockTransport)
+    check room.code == "UR4821"
+    check room.seatToken == "tok1"
+    check pollOnlineRoom(room, DefaultApiBase, mockTransport)
+    check room.players.len == 2
+    check submitOnlineMove(room, "Roll", %*{"dice": [1, 2, 3]}, DefaultApiBase, mockTransport)
+    check room.turnSeq == 2
+
+    var p2 = initDefaultProfile()
+    let joined = joinOnlineRoom(p2, "UR4821", DefaultApiBase, mockTransport)
+    check joined.code == "UR4821"
+    check joined.seat == 1
+
+    # Exercise presenter modal transitions
+    var pr = newPegsOfUrPresenter(1680.0, 960.0, seed = 777, showSetupModal = false)
+    pr.profile = initDefaultProfile()
+    pr.httpTransport = mockTransport
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baOpenGlobalStandings:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.modal == mkGlobalStandings
+    check pr.globalStandings.len == 1
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baToggleStandingsMode:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baRefreshStandings:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baCloseModal:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baOpenOnlineLobby:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.modal == mkOnlineLobby
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baCreateOnlineRoom:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.onlineRoom.code == "UR4821"
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baPollOnlineRoom:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baCloseModal:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baOpenSupport:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.modal == mkSupport
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baOpenStripeSupport5:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check "stripe.com" in pr.pendingExternalUrl
+    pr.rebuildButtons()
+    for b in pr.buttons:
+      if b.action == baMarkSupported:
+        discard pr.onMouseClick(b.rect.x + 4.0, b.rect.y + 4.0)
+        break
+    check pr.profile.supported

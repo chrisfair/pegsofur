@@ -35,9 +35,10 @@ import gdext/classes/[
   gdinputeventmousemotion,
   gdthemedb,
   gdfont,
+  gdos,
 ]
 
-import ../sim/[data, entropy, game, physics, presenter]
+import ../sim/[data, entropy, game, online, physics, presenter]
 
 const AudioPoolSize = 14
 
@@ -777,8 +778,68 @@ proc drawModal(self: PegsOfUrController; font: gdref Font) =
         self.drawText(font, mr.x + 612.0, ry + 27.0, fmt"{s.totalVp} VP", 14, color(1.0, 0.90, 0.50, 1.0))
         self.drawText(font, mr.x + 685.0, ry + 27.0, fmt"{s.tiebreakerWaresValue}s", 13, color(0.90, 0.84, 0.72, 1.0))
 
+  of mkGlobalStandings:
+    self.drawText(font, mr.x + 20.0, mr.y + 34.0, "GLOBAL STANDINGS — PEGS OF UR", 19, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
+    let rem = p.profile.remainingOnlineGamesToday()
+    let quotaStr =
+      if rem < 0: "Online Quota: Unlimited (Supporter)"
+      else: fmt"Online Quota: {rem} / {FreeDailyOnlineLimit} free games remaining today"
+    let emailStr = if p.profile.email.len > 0: p.profile.email else: "No email linked (profile.json)"
+    self.drawText(font, mr.x + 24.0, mr.y + 112.0, fmt"Account: {emailStr}  •  {quotaStr}", 12, color(0.88, 0.80, 0.64, 1.0))
+    if p.onlineStatusMsg.len > 0:
+      self.drawText(font, mr.x + 24.0, mr.y + 132.0, p.onlineStatusMsg, 12, color(0.68, 0.94, 0.72, 1.0))
+    if p.globalStandings.len == 0:
+      self.drawText(font, mr.x + 24.0, mr.y + 174.0, "No entries yet for this mode — finish a match and click 'Submit Current Score'!", 13, color(0.86, 0.78, 0.64, 1.0))
+    else:
+      var ry = mr.y + 160.0
+      for idx, e in p.globalStandings:
+        if idx >= 9: break
+        let line = fmt"#{e.rank}  {e.displayName}  —  {e.score} VP  ({e.worksBuilt} Works, {e.advancements} Adv, {e.rounds} Rds)"
+        self.drawText(font, mr.x + 26.0, ry, line, 13, if idx == 0: color(1.0, 0.90, 0.50, 1.0) else: color(0.95, 0.90, 0.80, 1.0))
+        ry += 28.0
+
+  of mkOnlineLobby:
+    self.drawText(font, mr.x + 20.0, mr.y + 34.0, "ONLINE MULTIPLAYER LOBBY", 19, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
+    let rem = p.profile.remainingOnlineGamesToday()
+    let quotaStr =
+      if rem < 0: "Unlimited online games active (Supporter / Microsoft Store)"
+      else: fmt"Free online allowance: {rem} of {FreeDailyOnlineLimit} games remaining today (offline/AI is always unlimited)"
+    self.drawText(font, mr.x + 24.0, mr.y + 70.0, quotaStr, 13, color(0.90, 0.82, 0.66, 1.0), mr.w - 48.0, horizontalAlignmentCenter)
+    if p.onlineStatusMsg.len > 0:
+      self.drawText(font, mr.x + 28.0, mr.y + 178.0, p.onlineStatusMsg, 13, color(0.68, 0.94, 0.72, 1.0))
+    if p.onlineRoom.code.len == 6:
+      self.drawText(font, mr.x + 28.0, mr.y + 216.0, fmt"Active Room Code: {p.onlineRoom.code}   •   Status: {p.onlineRoom.status}   •   Turn #{p.onlineRoom.turnSeq}", 15, color(1.0, 0.90, 0.50, 1.0))
+      var py = mr.y + 252.0
+      for pl in p.onlineRoom.players:
+        self.drawText(font, mr.x + 36.0, py, fmt"Seat {pl.seat + 1}: {pl.displayName}", 13, color(0.94, 0.88, 0.76, 1.0))
+        py += 26.0
+    else:
+      self.drawText(font, mr.x + 28.0, mr.y + 216.0, "Create a 2P or 4P room above to receive a 6-character code to share with friends.", 13, color(0.86, 0.78, 0.64, 1.0))
+
+  of mkSupport:
+    self.drawText(font, mr.x + 20.0, mr.y + 38.0, "SUPPORT PEGS OF UR DEVELOPMENT", 19, color(0.99, 0.90, 0.68, 1.0), mr.w - 40.0, horizontalAlignmentCenter, shadow = true)
+    let lines = [
+      "Pegs of Ur is free and open-source on Linux with unlimited offline & AI play.",
+      fmt"Online networked rooms include {FreeDailyOnlineLimit} free games per day.",
+      "Voluntary contributors ($1 or $5 via Stripe) unlock unlimited online games",
+      "per day across all devices linked to their supporter email.",
+      "",
+      "100% optional — zero ads, zero tracking, zero microtransactions.",
+    ]
+    var ly = mr.y + 84.0
+    for ln in lines:
+      self.drawText(font, mr.x + 32.0, ly, ln, 13, color(0.94, 0.88, 0.76, 1.0), mr.w - 64.0, horizontalAlignmentCenter)
+      ly += 24.0
+    if p.onlineStatusMsg.len > 0:
+      self.drawText(font, mr.x + 24.0, mr.y + 306.0, p.onlineStatusMsg, 13, color(0.68, 0.94, 0.72, 1.0), mr.w - 48.0, horizontalAlignmentCenter)
+
   of mkNone:
     discard
+
+  if not self.headless and p.pendingExternalUrl.len > 0:
+    let url = p.pendingExternalUrl
+    p.pendingExternalUrl = ""
+    discard OS.singleton.shellOpen(newGdString(url))
 
 method draw*(self: PegsOfUrController) {.gdsync.} =
   if self.presenter.isNil:

@@ -1,0 +1,34 @@
+services:
+  pegsofur-api:
+    build: .
+    container_name: pegsofur-api-prod
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 96m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./data:/data
+    networks:
+      - bughouse_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pegsofur.entrypoints=websecure"
+      - "traefik.http.routers.pegsofur.rule=(Host(`bughouse-online.com`) || Host(`www.bughouse-online.com`) || Host(`fair-chess.com`) || Host(`www.fair-chess.com`)) && PathPrefix(`/pegsofur-api`)"
+      - "traefik.http.routers.pegsofur.tls.certresolver=myresolver"
+      - "traefik.http.routers.pegsofur.priority=210"
+      - "traefik.http.middlewares.pegsofur-strip.stripprefix.prefixes=/pegsofur-api"
+      - "traefik.http.middlewares.pegsofur-ratelimit.ratelimit.average=25"
+      - "traefik.http.middlewares.pegsofur-ratelimit.ratelimit.burst=50"
+      - "traefik.http.routers.pegsofur.middlewares=pegsofur-strip,pegsofur-ratelimit"
+      - "traefik.http.services.pegsofur.loadbalancer.server.port=8092"
+
+networks:
+  bughouse_default:
+    external: true
