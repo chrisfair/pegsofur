@@ -8,3 +8,6 @@ nim/.nimcache/
 *.gcno
 *.gcda
 *.gcov
+
+__pycache__/
+*.pyc
