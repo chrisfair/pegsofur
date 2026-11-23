@@ -27,6 +27,7 @@ SUPPORTER_API_BASE = os.environ.get(
     "SUPPORTER_API_BASE", "http://fairplay-telemetry-prod:8091"
 ).rstrip("/")
 FREE_DAILY_ONLINE_LIMIT = int(os.environ.get("FREE_DAILY_ONLINE_LIMIT", "5"))
+DEVELOPER_FREE_EMAIL = "itsmineyadolt@themasterofall.org"
 
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]{1,64}@[a-zA-Z0-9.\-]{1,120}\.[a-zA-Z]{2,24}$")
 NAME_RE = re.compile(r"^[a-zA-Z0-9 _.\-]{2,32}$")
@@ -116,6 +117,8 @@ def check_shared_supporter(email: str) -> tuple[bool, str]:
     clean = email.strip().lower()
     if not clean:
         return False, ""
+    if clean == DEVELOPER_FREE_EMAIL:
+        return True, "Developer / Free Pass"
     try:
         url = f"{SUPPORTER_API_BASE}/v1/supporter?handle={urllib.parse.quote(clean)}&source=newscid"
         req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "PegsOfUr/1.0"})

@@ -9,6 +9,7 @@ const
   DefaultApiBase* = "https://bughouse-online.com/pegsofur-api"
   FreeDailyOnlineLimit* = 5
   SupportPromptMinGames* = 3
+  DeveloperFreeEmail* = "itsmineyadolt@themasterofall.org"
   StripeLink1Usd* = "https://buy.stripe.com/14A7sEgae18A5Mi3P2efC00"
   StripeLink5Usd* = "https://buy.stripe.com/cNidR2e262cEeiOdpCefC01"
 
@@ -105,8 +106,11 @@ proc normalizeDailyQuota*(p: var PegsProfile; today: string = todayDateKey()) =
     p.dailyDate = today
     p.dailyOnlineGamesUsed = 0
 
+proc isDeveloperFreeEmail*(email: string): bool {.inline.} =
+  email.strip().toLowerAscii() == DeveloperFreeEmail
+
 proc isUnlimitedOnline*(p: PegsProfile): bool =
-  p.supported or p.isMicrosoftStore
+  p.supported or p.isMicrosoftStore or isDeveloperFreeEmail(p.email)
 
 proc remainingOnlineGamesToday*(p: PegsProfile; today: string = todayDateKey()): int =
   if p.isUnlimitedOnline():
@@ -130,8 +134,8 @@ proc recordLocalGameCompleted*(p: var PegsProfile) =
   inc p.gamesCompleted
 
 proc shouldShowSupportPrompt*(p: PegsProfile): bool =
-  not p.isMicrosoftStore and not p.supported and not p.supportPromptDismissed and
-    p.gamesCompleted >= SupportPromptMinGames
+  not p.isMicrosoftStore and not p.supported and not isDeveloperFreeEmail(p.email) and
+    not p.supportPromptDismissed and p.gamesCompleted >= SupportPromptMinGames
 
 proc buildSupportCheckoutUrl*(email: string; amountUsd: int = 5): string =
   let base = if amountUsd <= 1: StripeLink1Usd else: StripeLink5Usd

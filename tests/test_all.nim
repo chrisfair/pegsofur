@@ -668,6 +668,16 @@ suite "Pegs of Ur Online, Quota, Standings & Support":
     check not shouldShowSupportPrompt(prof)
     check recordOnlineGameStarted(prof, "2026-11-23")
 
+    # Developer / free-pass email override in profile JSON
+    var devProf = initDefaultProfile()
+    devProf.email = "  ItsMineYaDolt@TheMasterOfAll.org "
+    devProf.gamesCompleted = 10
+    check isDeveloperFreeEmail(devProf.email)
+    check isUnlimitedOnline(devProf)
+    check remainingOnlineGamesToday(devProf, "2026-11-23") == -1
+    check not shouldShowSupportPrompt(devProf)
+    check recordOnlineGameStarted(devProf, "2026-11-23")
+
     # Disk round-trip
     let tmpPath = getTempDir() / "pegsofur_test_profile.json"
     defer:
