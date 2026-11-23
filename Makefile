@@ -21,7 +21,7 @@ MISE_EXEC := $(shell command -v nim >/dev/null 2>&1 || echo "mise exec --")
 export NIMBLE_DIR
 export PATH := $(NIMBLE_DIR)/bin:$(PATH)
 
-.PHONY: help all check test unit-test coverage cov report deps build smoke run dev editor clean
+.PHONY: help all check test unit-test coverage cov report deps build build-windows smoke run dev editor clean
 
 help: ## Show available targets for testing, coverage, building, and running
 	@printf "Pegs of Ur (Nim + Godot 4) targets:\n\n"
@@ -70,6 +70,31 @@ build: ## Compile the Nim GDExtension shared library for Godot 4
 	@mkdir -p .godot
 	@printf "res://nim/PegsOfUr.gdextension\n" > .godot/extension_list.cfg
 	cd nim && $(MISE_EXEC) env NIMBLE_DIR="$(NIMBLE_DIR)" nim c bootstrap.nim
+
+build-windows: ## Cross-compile the Windows x86_64 Nim GDExtension DLL on Linux (uses mingw-w64 or zig cc)
+	@mkdir -p "$(BUILD_DIR)/wincc" nim/lib
+	@WIN_PATH="$$PATH"; CC_DIR="/usr/bin"; \
+	if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		if command -v zig >/dev/null 2>&1; then \
+			printf '#!/usr/bin/env bash\nexec zig cc -target x86_64-windows-gnu "$$@"\n' > "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-cc"; \
+			printf '#!/usr/bin/env bash\nexec zig cc -target x86_64-windows-gnu "$$@"\n' > "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-gcc"; \
+			printf '#!/usr/bin/env bash\nexec zig c++ -target x86_64-windows-gnu "$$@"\n' > "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-g++"; \
+			chmod +x "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-cc" "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-gcc" "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-g++"; \
+			WIN_PATH="$(BUILD_DIR)/wincc:$$PATH"; \
+			CC_DIR="$(BUILD_DIR)/wincc"; \
+		else \
+			echo "Error: install mingw-w64-gcc or zig to cross-compile Windows DLLs." >&2; exit 1; \
+		fi; \
+	elif ! command -v x86_64-w64-mingw32-cc >/dev/null 2>&1; then \
+		ln -sf "$$(command -v x86_64-w64-mingw32-gcc)" "$(BUILD_DIR)/wincc/x86_64-w64-mingw32-cc"; \
+		WIN_PATH="$(BUILD_DIR)/wincc:$$PATH"; \
+	fi; \
+	cd nim && env PATH="$$WIN_PATH" NIMBLE_DIR="$(NIMBLE_DIR)" mise exec -- nim c \
+		-d:platform=windows -d:mingw -d:release \
+		--gcc.path:"$$CC_DIR" \
+		--gcc.exe:"x86_64-w64-mingw32-gcc" \
+		--gcc.linkerexe:"x86_64-w64-mingw32-gcc" \
+		bootstrap.nim
 
 smoke: build ## Run headless Godot 4 integration smoke check
 	"$(GODOT_BIN)" --headless --path . --quit-after 10
