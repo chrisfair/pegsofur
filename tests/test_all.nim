@@ -896,3 +896,46 @@ suite "Pegs of Ur Online, Quota, Standings & Support":
       p2.tick(0.1)
     check p2.appliedMoveSeq == sharedSeq
     check p2.game.phase == p1.game.phase
+
+  test "all 7 completed Great Works grant their ongoing perks":
+    var g = newPegsOfUrGame(seed = 4242)
+    g.startGame([
+      SeatConfig(name: "Ur", seatType: stHuman),
+      SeatConfig(name: "Closed2", seatType: stClosed),
+      SeatConfig(name: "Closed3", seatType: stClosed),
+      SeatConfig(name: "Closed4", seatType: stClosed),
+    ])
+    # Baseline without Great Works
+    check g.maxRolls == 3
+    check g.wareStorageLimit(0) == DefaultWaresLimit
+
+    # Complete all 7 Great Works for player 0
+    for idx, gw in GreatWorks:
+      g.players[0].workProgress[idx] = gw.builders
+    g.players[0].wares = [5, 3, 0, 0, 0] # 8 total wares
+    check g.wareStorageLimit(0) == DefaultWaresLimit + 2
+    check g.excessWaresToDiscard(0) == 0
+
+    # New turn grants 4 casts from Standing Stones
+    g.players[0].wares = [0, 0, 0, 0, 0]
+    for i in 0 ..< g.diceFaces.len:
+      g.diceFaces[i] = dfGrain3
+    g.finishRolling()
+    g.finishBuilding()
+    g.skipBuying()
+    check g.maxRolls == 4
+
+    # Set all dice to Grain3 so builders/silver/wares come strictly from Great Work perks
+    g.players[0].wares = [0, 0, 0, 0, 0]
+    g.players[0].grain = 3
+    for i in 0 ..< g.diceFaces.len:
+      g.diceFaces[i] = dfGrain3
+    g.finishRolling()
+    # Mudbrick Shrine (+1s) + Citadel Ramparts (+2s) + Sun Ziggurat (+3s) = 6 Silver
+    check g.turnSilver == 6
+    # Royal Stele (+1B) = 1 Builder
+    check g.turnBuilders == 1
+    # Sun Ziggurat (+1 Ware) = 1 Timber
+    check g.playerTotalWares(0) == 1
+    # River Sanctuary (+1G) + Terraced Groves (+1G) + 3*3G = +11G -> 3+11-3 fed = 11 Grain
+    check g.players[0].grain == 11

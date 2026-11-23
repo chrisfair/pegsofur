@@ -193,6 +193,14 @@ proc getStandings*(g: PegsOfUrGame): seq[ScoreBreakdown] =
     cmp(b.tiebreakerWaresValue, a.tiebreakerWaresValue)
   )
 
+proc playerHasWork*(g: PegsOfUrGame; pIdx: int; id: string): bool =
+  if pIdx < 0 or pIdx >= g.players.len:
+    return false
+  for idx, gw in GreatWorks:
+    if gw.id == id:
+      return g.players[pIdx].workProgress[idx] >= gw.builders
+  false
+
 proc beginTurn(g: PegsOfUrGame) =
   let numDice = g.players[g.activePlayerIdx].settlements
   g.diceFaces.setLen(numDice)
@@ -208,6 +216,7 @@ proc beginTurn(g: PegsOfUrGame) =
 
   inc g.rollEventSeq
   g.rollsUsed = 1
+  g.maxRolls = if g.playerHasWork(g.activePlayerIdx, "standing_stones"): 4 else: 3
   g.divinationUsed = false
   g.turnBuilders = 0
   g.turnSilver = 0
@@ -360,10 +369,15 @@ proc finishTurn(g: PegsOfUrGame) =
     inc g.activePlayerIdx
   g.beginTurn()
 
+proc wareStorageLimit*(g: PegsOfUrGame; pIdx: int): int =
+  result = DefaultWaresLimit
+  if g.playerHasWork(pIdx, "terraced_groves"):
+    result += 2
+
 proc excessWaresToDiscard*(g: PegsOfUrGame; pIdx: int): int =
   if g.playerHasAdv(pIdx, "merchant_fleets"):
     return 0
-  max(0, g.playerTotalWares(pIdx) - DefaultWaresLimit)
+  max(0, g.playerTotalWares(pIdx) - g.wareStorageLimit(pIdx))
 
 proc enterDiscardOrEndTurn(g: PegsOfUrGame) =
   if g.excessWaresToDiscard(g.activePlayerIdx) > 0:
@@ -514,6 +528,28 @@ proc resolveHarvestFeedCalamities(g: PegsOfUrGame) =
     of dfSilver7:
       g.turnSilver += (if hasMint: 12 else: 7)
 
+  # Completed Great Works ongoing civic perks
+  var workBonusNotes: seq[string] = @[]
+  if g.playerHasWork(pIdx, "mudbrick_shrine"):
+    g.turnSilver += 1
+    workBonusNotes.add("+1s Shrine")
+  if g.playerHasWork(pIdx, "river_sanctuary"):
+    grainGain += 1
+    workBonusNotes.add("+1 Grain Sanctuary")
+  if g.playerHasWork(pIdx, "royal_stele"):
+    g.turnBuilders += 1
+    workBonusNotes.add("+1B Stele")
+  if g.playerHasWork(pIdx, "terraced_groves"):
+    grainGain += 1
+    workBonusNotes.add("+1 Grain Groves")
+  if g.playerHasWork(pIdx, "citadel_ramparts"):
+    g.turnSilver += 2
+    workBonusNotes.add("+2s Ramparts")
+  if g.playerHasWork(pIdx, "sun_ziggurat"):
+    inc waresRolled
+    g.turnSilver += 3
+    workBonusNotes.add("+1 Ware/+3s Ziggurat")
+
   g.players[pIdx].grain = min(MaxGrain, g.players[pIdx].grain + grainGain)
 
   var cutBonus = 0
@@ -535,6 +571,9 @@ proc resolveHarvestFeedCalamities(g: PegsOfUrGame) =
   if parts.len > 0:
     let pJoined = parts.join(", ")
     g.addLog(fmt"{g.players[pIdx].name} gathered: {pJoined}.")
+  if workBonusNotes.len > 0:
+    let wJoined = workBonusNotes.join(", ")
+    g.addLog(fmt"Great Work blessings: {wJoined}.")
 
   let setCnt = g.players[pIdx].settlements
   if g.players[pIdx].grain >= setCnt:

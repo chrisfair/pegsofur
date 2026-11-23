@@ -134,13 +134,13 @@ const
   ]
 
   GreatWorks*: array[7, GreatWorkDef] = [
-    GreatWorkDef(id: "mudbrick_shrine", name: "Mudbrick Shrine", builders: 3, vpFirst: 1, vpLater: 0, skip2p: false, skip3p: false, note: ""),
-    GreatWorkDef(id: "standing_stones", name: "Standing Stones", builders: 5, vpFirst: 2, vpLater: 1, skip2p: false, skip3p: false, note: ""),
-    GreatWorkDef(id: "river_sanctuary", name: "River Sanctuary", builders: 7, vpFirst: 4, vpLater: 3, skip2p: true, skip3p: false, note: "3-4P / Solo"),
-    GreatWorkDef(id: "royal_stele", name: "Royal Stele", builders: 9, vpFirst: 6, vpLater: 4, skip2p: false, skip3p: false, note: ""),
-    GreatWorkDef(id: "terraced_groves", name: "Terraced Groves", builders: 11, vpFirst: 8, vpLater: 5, skip2p: false, skip3p: true, note: "2P / 4P / Solo"),
-    GreatWorkDef(id: "citadel_ramparts", name: "Citadel Ramparts", builders: 13, vpFirst: 10, vpLater: 6, skip2p: false, skip3p: false, note: "Blocks Raiders"),
-    GreatWorkDef(id: "sun_ziggurat", name: "Sun Ziggurat", builders: 15, vpFirst: 12, vpLater: 8, skip2p: true, skip3p: false, note: "3-4P / Solo"),
+    GreatWorkDef(id: "mudbrick_shrine", name: "Mudbrick Shrine", builders: 3, vpFirst: 1, vpLater: 0, skip2p: false, skip3p: false, note: "+1 Silver/turn"),
+    GreatWorkDef(id: "standing_stones", name: "Standing Stones", builders: 5, vpFirst: 2, vpLater: 1, skip2p: false, skip3p: false, note: "+1 Reroll/turn (4 casts)"),
+    GreatWorkDef(id: "river_sanctuary", name: "River Sanctuary", builders: 7, vpFirst: 4, vpLater: 3, skip2p: true, skip3p: false, note: "3-4P/Solo · +1 Grain/turn"),
+    GreatWorkDef(id: "royal_stele", name: "Royal Stele", builders: 9, vpFirst: 6, vpLater: 4, skip2p: false, skip3p: false, note: "+1 Builder/turn"),
+    GreatWorkDef(id: "terraced_groves", name: "Terraced Groves", builders: 11, vpFirst: 8, vpLater: 5, skip2p: false, skip3p: true, note: "2P/4P/Solo · +2 Ware cap & +1 Grain/turn"),
+    GreatWorkDef(id: "citadel_ramparts", name: "Citadel Ramparts", builders: 13, vpFirst: 10, vpLater: 6, skip2p: false, skip3p: false, note: "Blocks Raiders · +2 Silver/turn"),
+    GreatWorkDef(id: "sun_ziggurat", name: "Sun Ziggurat", builders: 15, vpFirst: 12, vpLater: 8, skip2p: true, skip3p: false, note: "3-4P/Solo · +1 Ware & +3 Silver/turn"),
   ]
 
   Advancements*: array[13, AdvancementDef] = [
